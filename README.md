@@ -1,6 +1,4 @@
-# fixSidecar# 
-
-**DICOM JSON Update Script Documentation**
+# Fix Sidecar
 
 ## **Overview**
 
@@ -9,7 +7,7 @@ This Python script is designed to update a BIDS-compliant JSON sidecar file usin
 - DICOM files.
 - Optional Exam Card files (specific to Philips scanners).
 
-The script calculates additional fields such as `SliceTiming`, `TotalReadoutTime`, and `PhaseEncodingDirection` to enhance the metadata.
+The script calculates additional fields such as `SliceTiming`, `TotalReadoutTime`, `EffectiveEchoSpacing`, and `PhaseEncodingDirection` to enhance the metadata.
 
 ---
 
@@ -26,6 +24,12 @@ The script calculates additional fields such as `SliceTiming`, `TotalReadoutTime
      - Exam Card parameters (`EPI factor` and `Bandwidth`).
 4. **Exam Card Parsing**
    - Matches protocol details for a given series description in the Exam Card file.
+5. **JSON Metadata Updates**
+   - Updates the JSON sidecar with:
+     - `SliceTiming`
+     - `TotalReadoutTime`
+     - `EffectiveEchoSpacing`
+     - `PhaseEncodingDirection`
 
 ---
 
@@ -46,7 +50,7 @@ python script_name.py <dicom_file> <json_file> <output_file> <exam_card_file>
 
 ## **Function Descriptions**
 
-### \*\*1. \*\***`calculate_slice_timing`**
+### **1. `calculate_slice_timing`**
 
 ```python
 def calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr)
@@ -63,7 +67,7 @@ def calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr)
 
 ---
 
-### \*\*2. \*\***`calculate_total_readout_time`**
+### **2. `calculate_total_readout_time`**
 
 ```python
 def calculate_total_readout_time(phase_encoding_steps, effective_echo_spacing)
@@ -77,7 +81,7 @@ def calculate_total_readout_time(phase_encoding_steps, effective_echo_spacing)
 
 ---
 
-### \*\*3. \*\***`calculate_total_readout_time_from_exam_card`**
+### **3. `calculate_total_readout_time_from_exam_card`**
 
 ```python
 def calculate_total_readout_time_from_exam_card(protocol_details)
@@ -90,7 +94,7 @@ def calculate_total_readout_time_from_exam_card(protocol_details)
 
 ---
 
-### \*\*4. \*\***`match_protocol_in_exam_card`**
+### **4. `match_protocol_in_exam_card`**
 
 ```python
 def match_protocol_in_exam_card(series_description, exam_card_path)
@@ -104,7 +108,7 @@ def match_protocol_in_exam_card(series_description, exam_card_path)
 
 ---
 
-### \*\*5. \*\***`determine_phase_encoding_direction`**
+### **5. `determine_phase_encoding_direction`**
 
 ```python
 def determine_phase_encoding_direction(dicom_path, scanner_type="SIEMENS", exam_card_path=None)
@@ -121,7 +125,7 @@ def determine_phase_encoding_direction(dicom_path, scanner_type="SIEMENS", exam_
 
 ---
 
-### \*\*6. \*\***`update_json_with_dicom_info`**
+### **6. `update_json_with_dicom_info`**
 
 ```python
 def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_total_readout=False, scanner_type="SIEMENS", exam_card_path=None)
@@ -135,11 +139,15 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
   - `calculate_total_readout` (bool): Flag to calculate total readout time from DICOM (if no Exam Card).
   - `scanner_type` (str): Scanner type (`"SIEMENS"` or `"PHILIPS"`).
   - `exam_card_path` (str, optional): Path to the Exam Card file.
-- **Output**: None. Saves the updated JSON file to `output_path`.
+- **Output**: Updates the following fields in the JSON file:
+  - `SliceTiming`
+  - `TotalReadoutTime`
+  - `EffectiveEchoSpacing`
+  - `PhaseEncodingDirection`
 
 ---
 
-### \*\*7. \*\***`print_help`**
+### **7. `print_help`**
 
 ```python
 def print_help()
@@ -167,6 +175,4 @@ python update_json_sidecar.py \
 - For Philips scanners, include the Exam Card to provide additional metadata.
 
 ---
-
-
 
