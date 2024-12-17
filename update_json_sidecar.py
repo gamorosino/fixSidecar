@@ -1,10 +1,12 @@
 import pydicom
 import json
 import numpy as np
-import os
 import sys
+import ast
+import re
 
 def calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr):
+    """Calculate slice timing based on acquisition parameters."""
     set_interval = (tr / 1000) / sets_per_tr  # Convert TR from ms to seconds
     slice_timing = np.zeros(num_slices)
     
@@ -13,9 +15,73 @@ def calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr):
             slice_timing[slice_index] = i * set_interval
     return slice_timing.tolist()
 
+
+def calculate_correct_slice_order(num_slices, mb_factor):
+    """Calculate slice acquisition order based on number of slices and MB factor."""
+    if mb_factor <= 0:
+        raise ValueError("MultiBand Factor (MB Factor) must be greater than zero.")
+
+    slice_order = []
+    step_size = 4  # Increment between groups
+    start_offsets = [0, 1, 2, 3]  # Starting offsets for each slice set
+    # Loop to create the interleaved groups
+    off=int(num_slices/mb_factor)
+    k=0
+    steps = 0
+    a_i=0
+    flag_on=0
+    cont=0
+    slices = list(range(0,num_slices,mb_factor))
+    for stp in slices:
+        group = []
+        cont = cont + 1
+        if stp == 0:
+            step_size=0
+            a_i=0
+        else:
+            step_size=4
+        if flag_on == 0:
+            if  a_i + step_size + off + off >= num_slices:
+                flag_on = 1
+                k = k + 1 
+                cont = 0
+                a_i=0 + k 
+                step_size=0
+                #a_i = a_i +  step_size
+        else:
+            if a_i +  step_size+2*off >= num_slices:
+                flag_on = 1
+                k = k + 1 
+                cont = 0
+                a_i=0 + k 
+                step_size=0
+                #a_i = a_i +  step_size
+        a_i = a_i +  step_size
+        b_i = a_i + off
+        c_i = b_i + off
+
+        group=[a_i,b_i,c_i]
+        slice_order.append(group)
+
+    return slice_order
+
+
+
+def parse_tr_from_exam_card(protocol_details):
+    """Extract TR (Repetition Time) from the protocol details, handling various formats."""
+    tr = None
+    for line in protocol_details.splitlines():
+        if "Act. TR/TE (ms)" in line: #or "TR  :" in line:
+            match = re.search(r"(\d+)\s*(?:/\s*\d+)?", line)
+            if match:
+                tr = int(match.group(1))
+    return tr
+
+
 def calculate_total_readout_time(phase_encoding_steps, effective_echo_spacing):
     """Calculate Total Readout Time using DICOM metadata."""
     return (phase_encoding_steps - 1) * effective_echo_spacing
+
 
 def calculate_total_readout_time_from_exam_card(protocol_details):
     """Calculate Total Readout Time using EPI factor and bandwidth from exam card."""
@@ -35,6 +101,7 @@ def calculate_total_readout_time_from_exam_card(protocol_details):
     total_readout_time = (epi_factor - 1) * effective_echo_spacing
     return total_readout_time
 
+
 def match_protocol_in_exam_card(series_description, exam_card_path):
     """Match the series description with the corresponding protocol in the exam card."""
     matched_protocol = []
@@ -45,18 +112,32 @@ def match_protocol_in_exam_card(series_description, exam_card_path):
         for i, line in enumerate(lines):
             normalized_line = line.strip().lower()
             if normalized_series_description in normalized_line and "protocol name:" in normalized_line:
-                #print(f"Series matched: {line.strip()}")
                 capture = True
                 matched_protocol.append(line)
                 continue
             if capture:
                 if "protocol name:" in normalized_line and i != 0:
-                    #print(f"End of protocol for: {series_description}")
                     break
                 matched_protocol.append(line)
     if not matched_protocol:
         print(f"No match found for series: {series_description}")
     return "".join(matched_protocol) if matched_protocol else None
+
+
+def extract_parameters_from_exam_card(protocol_details):
+    """Extract parameters from the protocol details in the exam card."""
+    tr = parse_tr_from_exam_card(protocol_details)
+    num_slices = None
+    mb_factor = None
+
+    for line in protocol_details.splitlines():
+        if "EX_STACKS_0__slices" in line:
+            num_slices = int(line.split(":")[-1].strip())
+        elif "MB Factor" in line:
+            mb_factor = int(line.split(":")[-1].strip())
+
+    return tr, num_slices, mb_factor
+
 
 def determine_phase_encoding_direction(dicom_path, scanner_type="SIEMENS", exam_card_path=None):
     """Determine BIDS PhaseEncodingDirection from DICOM or Exam Card, supporting SIEMENS and PHILIPS."""
@@ -69,7 +150,6 @@ def determine_phase_encoding_direction(dicom_path, scanner_type="SIEMENS", exam_
     if exam_card_path:
         protocol_details = match_protocol_in_exam_card(series_description, exam_card_path)
         if protocol_details:
-            # Extract prep_dir and fat_shift_dir values
             prep_dir = None
             fat_shift_dir = None
             for line in protocol_details.splitlines():
@@ -78,134 +158,163 @@ def determine_phase_encoding_direction(dicom_path, scanner_type="SIEMENS", exam_
                 if "EX_STACKS_0__fat_shift_dir" in line:
                     fat_shift_dir = line.split(":")[-1].strip().lower()
 
-            # Determine PhaseEncodingDirection based on extracted values
-
             if fat_shift_dir == "a":
-                print("Fatshift direction detected: A (posterior to anterior in Siemens)")
                 return "j-"
             elif fat_shift_dir == "p":
-                print("Fatshift direction detected: P (anterior to posterior in Siemens)")
                 return "j"
-
-
             if prep_dir == "AP":
-                print("anterior to posterior")
                 return "j-"
             elif prep_dir == "PA":
-                print("posterior to anterior")
                 return "j"
             elif prep_dir == "LR":
-                print("left to right")
                 return "i-"
             elif prep_dir == "RL":
-                print("right to left")
                 return "i"
-            
 
-
-    # Fallback to DICOM metadata if exam card information is unavailable
     inplane_pe_dir = ds.get((0x0018, 0x1312), None)
     if inplane_pe_dir is None:
         raise ValueError(f"InPlanePhaseEncodingDirection not found in DICOM for SeriesDescription: '{series_description}'")
 
     inplane_pe_dir = inplane_pe_dir.value
-
-    if scanner_type.upper() == "SIEMENS":
-
-        from nibabel.nicom.csareader import read as read_csa
-        csa_str = ds.get((0x0029, 0x1010), None)
-        if csa_str is None:
-            raise ValueError("CSA header not found in DICOM.")
-
-        csa_tr = read_csa(csa_str.value)
-        pedp = csa_tr['tags']['PhaseEncodingDirectionPositive']['items'][0]
-        pedp_to_sign = {0: '-', 1: ''}
-        sign = pedp_to_sign[pedp]
-    elif scanner_type.upper() == "PHILIPS":
-        pedp_to_sign = {"AP": "-", "PA": "", "RL": "-", "LR": ""}  # Derived from Exam Card conventions
-        sign = pedp_to_sign.get(inplane_pe_dir, '')
-    else:
-        raise ValueError(f"Unsupported scanner type: {scanner_type}")
-
-    # Map to BIDS-compliant phase encoding direction
-    return f"{rowcol_to_niftidim[inplane_pe_dir]}{sign}"
+    return f"{rowcol_to_niftidim[inplane_pe_dir]}"
 
 
-def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_total_readout=False, scanner_type="SIEMENS", exam_card_path=None):
+def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_total_readout=False, scanner_type="SIEMENS", exam_card_path=None, compute_slice_timing=False, user_slice_order=None):
     # Read the DICOM file
     ds = pydicom.dcmread(dicom_path)
+    with open(json_path, 'r') as f:
+        json_data = json.load(f)    
+    phase_encoding_steps = int(json_data.get("PhaseEncodingSteps", 95))
+    effective_echo_spacing = float(json_data.get("EffectiveEchoSpacing", 0.000593))
+    tr = float(json_data.get("RepetitionTime", 0))*1000
+    num_slices = int(json_data.get("NumberOfSlices", 0))
+    mb_factor = int(json_data.get("MultiBandFactor", 0))
 
-    # Extract parameters from DICOM metadata
-    phase_encoding_steps = int(ds.get("PhaseEncodingSteps", 95))
-    effective_echo_spacing = float(ds.get("EffectiveEchoSpacing", 0.000593))
-    tr = int(ds.get("RepetitionTime", 1500))  # in ms
-    num_slices = int(ds.get("NumberOfSlices", 54))
-    mb_factor = int(ds.get("MultiBandFactor", 3))
+    # If parameters are missing, fallback to DICOM
+    if not tr or not num_slices or not mb_factor:
+        ds = pydicom.dcmread(dicom_path)
+        phase_encoding_steps = int(getattr(ds, "PhaseEncodingSteps", phase_encoding_steps))
+        effective_echo_spacing = float(getattr(ds, "EffectiveEchoSpacing", effective_echo_spacing))
+        tr = int(getattr(ds, "RepetitionTime", tr))
+        num_slices = int(getattr(ds, "NumberOfSlices", num_slices))
+        mb_factor = int(getattr(ds, "MultiBandFactor", mb_factor))
 
-    # Get BIDS Phase Encoding Direction
+    # Fallback to exam card if parameters are missing
+    if not tr or not num_slices or not mb_factor:
+        if exam_card_path:
+            protocol_details = match_protocol_in_exam_card(ds.get("SeriesDescription", "Unknown"), exam_card_path)
+            if protocol_details:
+                tr_card, slices_card, mb_card = extract_parameters_from_exam_card(protocol_details)
+                tr = tr_card if not tr else tr
+                num_slices = slices_card if not num_slices else num_slices
+                mb_factor = mb_card if not mb_factor else mb_factor
+
+    # Default values if parameters are still missing
+    if not tr:
+        tr = 2000
+    if not num_slices:
+        num_slices = 64
+    if not mb_factor:
+        mb_factor = 1
+
+
+    print("tr: ",tr)
+    print("num_slices: ",num_slices)
+    print("mb_factor: ",mb_factor)
+
+
+
+    # Calculate Slice Timing
+    slice_timing = None
+    if compute_slice_timing:
+        # Slice order
+        if user_slice_order:
+            slice_order = ast.literal_eval(user_slice_order)  # Convert string to list
+            print(f"Using user-provided slice order: {slice_order}")
+        else:
+            slice_order = calculate_correct_slice_order(num_slices, mb_factor)
+        print(f"Calculated slice order: {slice_order}")
+        sets_per_tr = num_slices // mb_factor
+        print("sets_per_tr: ",sets_per_tr)
+        slice_timing = calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr)
+
+    # Determine Phase Encoding Direction
     bids_phase_encoding_direction = determine_phase_encoding_direction(dicom_path, scanner_type, exam_card_path)
 
-    # Assuming interleaved acquisition order (adjust as necessary)
-    sets_per_tr = num_slices // mb_factor
-    slice_order = [
-        [0, 18, 36], [4, 22, 40], [8, 26, 44], [12, 30, 48], [16, 34, 52],
-        [1, 19, 37], [5, 23, 41], [9, 27, 45], [13, 31, 49], [17, 35, 53],
-        [2, 20, 38], [6, 24, 42], [10, 28, 46], [14, 32, 50], [3, 21, 39],
-        [7, 25, 43], [11, 29, 47], [15, 33, 51]
-    ]
-
-    # Calculate parameters
-    slice_timing = calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr)
-
+    # Calculate Total Readout Time
     if exam_card_path:
         protocol_details = match_protocol_in_exam_card(ds.get("SeriesDescription", "Unknown"), exam_card_path)
+    
+    if calculate_total_readout:
         if protocol_details:
-            total_readout_time = calculate_total_readout_time_from_exam_card(protocol_details)
+                total_readout_time = calculate_total_readout_time_from_exam_card(protocol_details)
         else:
-            total_readout_time = calculate_total_readout_time(phase_encoding_steps, effective_echo_spacing)
-    elif calculate_total_readout:
-        total_readout_time = calculate_total_readout_time(phase_encoding_steps, effective_echo_spacing)
+                total_readout_time = calculate_total_readout_time(phase_encoding_steps, effective_echo_spacing)
     else:
-        total_readout_time = float(ds.get("EstimatedTotalReadoutTime", 0.055742))
+        total_readout_time = float(json_data.get("EstimatedTotalReadoutTime", None))
+        if total_readout_time is None:
+            total_readout_time = float(ds.get("EstimatedTotalReadoutTime", None))
+        total_readout_time = total_readout_time  #convert in seconds
 
-    # Update JSON sidecar
+    # Update JSON
     with open(json_path, 'r') as f:
         json_data = json.load(f)
 
-    json_data["SliceTiming"] = slice_timing
+    if slice_timing:
+        json_data["SliceTiming"] = slice_timing
     json_data["TotalReadoutTime"] = total_readout_time
     json_data["EffectiveEchoSpacing"] = effective_echo_spacing
     json_data["PhaseEncodingDirection"] = bids_phase_encoding_direction
 
-    # Save updated JSON
+    print("Slice Timing: ",slice_timing)
+    print("Total Readout Time: ",total_readout_time)
+    print("Effective echo spacing: ",effective_echo_spacing)
+    print("Phase Encoding Direction: ",bids_phase_encoding_direction)
+
+
     with open(output_path, 'w') as f:
         json.dump(json_data, f, indent=4)
 
     print(f"Updated JSON saved to {output_path}")
 
+
 def print_help():
     print("""
-Usage: python script_name.py <dicom_file> <json_file> <output_file> <exam_card_file>
+Usage: python script_name.py <dicom_file> <json_file> <output_file> <exam_card_file> [--compute-slice-timing] [--slice-order <slice_order>]
 
-Arguments:
-  dicom_file       Path to the input DICOM file.
-  json_file        Path to the input JSON file.
-  output_file      Path to save the updated JSON file.
-  exam_card_file   Path to the exam card file for additional metadata.
-
-Description:
-This script extracts metadata from a DICOM file and optionally an exam card file
-and updates a BIDS-compliant JSON sidecar with calculated slice timing,
-total readout time, and phase encoding direction.
+Options:
+  --compute-slice-timing   Enable Slice Timing calculation.
+  --slice-order            Provide a custom slice order as a string representation of a list of lists.
+                           Example: "[[0, 4, 8], [1, 5, 9], [2, 6, 10]]"
     """)
 
+
 if __name__ == '__main__':
-    if len(sys.argv) != 5:
+    if len(sys.argv) < 5:
         print_help()
         sys.exit(1)
 
     dicom_file = sys.argv[1]
     json_file = sys.argv[2]
     output_file = sys.argv[3]
-    exam_card_file = sys.argv[4]    
-    update_json_with_dicom_info(dicom_file, json_file, output_file, calculate_total_readout=False, scanner_type="PHILIPS", exam_card_path=exam_card_file)
+    exam_card_file = sys.argv[4]
+
+    compute_slice_timing = "--compute-slice-timing" in sys.argv
+    slice_order_arg = None
+    if "--slice-order" in sys.argv:
+        try:
+            slice_order_arg = sys.argv[sys.argv.index("--slice-order") + 1]
+        except IndexError:
+            print("Error: --slice-order requires a slice order as its argument.")
+            sys.exit(1)
+
+    update_json_with_dicom_info(
+        dicom_file,
+        json_file,
+        output_file,
+        calculate_total_readout=False,
+        scanner_type="PHILIPS",
+        exam_card_path=exam_card_file,
+        compute_slice_timing=compute_slice_timing,
+        user_slice_order=slice_order_arg,
+    )
