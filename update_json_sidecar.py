@@ -156,12 +156,12 @@ def determine_phase_encoding_direction(dicom_path, scanner_type="SIEMENS", exam_
                 if "EX_STACKS_0__prep_dir" in line:
                     prep_dir = line.split(":")[-1].strip().upper()
                 if "EX_STACKS_0__fat_shift_dir" in line:
-                    fat_shift_dir = line.split(":")[-1].strip().lower()
+                    fat_shift_dir = line.split(":")[-1].strip().upper()
 
-            if fat_shift_dir == "a":
-                return "j-"
-            elif fat_shift_dir == "p":
+            if fat_shift_dir == "A":
                 return "j"
+            elif fat_shift_dir == "P":
+                return "j-"
             if prep_dir == "AP":
                 return "j-"
             elif prep_dir == "PA":
