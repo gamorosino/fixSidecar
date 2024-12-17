@@ -45,6 +45,87 @@ The script calculates and updates additional metadata fields such as `SliceTimin
 
 ---
 
+
+## **Installation Guide**
+
+To initialize the repository and install all required dependencies, follow the steps below:
+
+### **Step 1: Clone the Repository**
+
+```bash
+git clone <repository-url>
+cd <repository-folder>
+```
+
+Replace `<repository-url>` and `<repository-folder>` with your actual repository URL and folder name.
+
+---
+
+### **Step 2: Create the `requirements.txt` File**
+
+Ensure your repository has a `requirements.txt` file. Use the content below:
+
+```text
+asttokens==2.0.5
+backcall==0.2.0
+decorator==5.1.1
+exceptiongroup==1.2.0
+executing==0.8.3
+importlib-resources==6.4.5
+ipython==8.15.0
+jedi==0.19.2
+matplotlib-inline==0.1.6
+nibabel==5.3.2
+numpy==2.0.2
+packaging==24.2
+parso==0.8.4
+pexpect==4.8.0
+pickleshare==0.7.5
+pip==24.3.1
+prompt-toolkit==3.0.43
+ptyprocess==0.7.0
+pure-eval==0.2.2
+pydicom==2.4.4
+Pygments==2.15.1
+setuptools==75.6.0
+six==1.16.0
+stack-data==0.2.0
+traitlets==5.14.3
+typing-extensions==4.12.2
+wcwidth==0.2.5
+zipp==3.21.0
+attrs==24.2.0
+jsonschema==4.23.0
+jsonschema-specifications==2024.10.1
+referencing==0.35.1
+rpds-py==0.22.3
+```
+
+---
+
+### **Step 3: Install Dependencies**
+
+Create a virtual environment and install the dependencies:
+
+```bash
+python3 -m venv env
+source env/bin/activate  # For Linux/macOS
+env\Scripts\activate     # For Windows
+
+pip install -r requirements.txt
+```
+
+---
+
+### **Step 4: Verify the Installation**
+
+Run the script help command to verify the installation:
+
+```bash
+python update_json_sidecar.py --help
+```
+---
+
 ## **Usage**
 
 ```bash
