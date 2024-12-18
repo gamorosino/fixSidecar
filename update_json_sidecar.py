@@ -16,14 +16,13 @@ def calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr):
     return slice_timing.tolist()
 
 
-def calculate_correct_slice_order(num_slices, mb_factor):
+def calculate_correct_slice_order(num_slices, mb_factor,step_size = 4 ):
     """Calculate slice acquisition order based on number of slices and MB factor."""
     if mb_factor <= 0:
         raise ValueError("MultiBand Factor (MB Factor) must be greater than zero.")
 
     slice_order = []
-    step_size = 4  # Increment between groups
-    start_offsets = [0, 1, 2, 3]  # Starting offsets for each slice set
+     # Increment between groups
     # Loop to create the interleaved groups
     off=int(num_slices/mb_factor)
     k=0
