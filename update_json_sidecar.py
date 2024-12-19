@@ -96,9 +96,13 @@ def calculate_total_readout_time_from_exam_card(protocol_details):
     if epi_factor is None or bandwidth is None:
         raise ValueError("EPI factor or bandwidth not found in exam card protocol.")
 
-    effective_echo_spacing = 1 / bandwidth
+    # Effective Echo Spacing in seconds
+    effective_echo_spacing = 1 / bandwidth  # Bandwidth is in Hz (cycles per second)
+    # Calculate Total Readout Time
     total_readout_time = (epi_factor - 1) * effective_echo_spacing
+    total_readout_time = round(total_readout_time, 6)  # Optional: rounding for better precision
     return total_readout_time
+
 
 
 def match_protocol_in_exam_card(series_description, exam_card_path):
@@ -188,7 +192,7 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
     tr = float(json_data.get("RepetitionTime", 0))*1000
     num_slices = int(json_data.get("NumberOfSlices", 0))
     mb_factor = int(json_data.get("MultiBandFactor", 0))
-
+    series_description = ds.get("SeriesDescription", "Unknown").strip()
     # If parameters are missing, fallback to DICOM
     if not tr or not num_slices or not mb_factor:
         ds = pydicom.dcmread(dicom_path)
@@ -209,10 +213,14 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
                 mb_factor = mb_card if not mb_factor else mb_factor
 
     # Default values if parameters are still missing
+
     if not tr:
-        tr = 2000
+        raise ValueError(f"Repetition Time not found SeriesDescription: '{series_description}'")
+
     if not num_slices:
-        num_slices = 64
+        raise ValueError(f"Number of Slices not found SeriesDescription: '{series_description}'")
+
+
     if not mb_factor:
         mb_factor = 1
 
@@ -243,17 +251,22 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
     # Calculate Total Readout Time
     if exam_card_path:
         protocol_details = match_protocol_in_exam_card(ds.get("SeriesDescription", "Unknown"), exam_card_path)
-    
+
     if calculate_total_readout:
         if protocol_details:
-                total_readout_time = calculate_total_readout_time_from_exam_card(protocol_details)
+            total_readout_time = calculate_total_readout_time_from_exam_card(protocol_details)
         else:
-                total_readout_time = calculate_total_readout_time(phase_encoding_steps, effective_echo_spacing)
+            # Ensure Effective Echo Spacing is in seconds
+            if effective_echo_spacing > 1:  # Assuming it might be in ms
+                effective_echo_spacing /= 1000
+            total_readout_time = calculate_total_readout_time(phase_encoding_steps, effective_echo_spacing)
     else:
         total_readout_time = float(json_data.get("EstimatedTotalReadoutTime", None))
         if total_readout_time is None:
             total_readout_time = float(ds.get("EstimatedTotalReadoutTime", None))
-        total_readout_time = total_readout_time  #convert in seconds
+    if total_readout_time and total_readout_time > 1:  # Convert from ms to seconds if necessary
+            total_readout_time /= 1000
+
 
     # Update JSON
     with open(json_path, 'r') as f:
