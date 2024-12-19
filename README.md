@@ -2,7 +2,9 @@
 
 ## **Overview**
 
+
 This script facilitates the conversion of DICOM files to NIfTI format and ensures the resulting JSON sidecar is compliant with BIDS (Brain Imaging Data Structure) metadata standards.
+
 ---
 
 ## Author
