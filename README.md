@@ -54,6 +54,12 @@ This script facilitates the conversion of DICOM files to NIfTI format and ensure
 
 ---
 
+## Author
+
+**Gabriele Amorosino** (gabriele.amorosino@utexas.edu)
+
+---
+
 ## **Installation Guide**
 
 To set up the repository and install dependencies:
