@@ -2,17 +2,35 @@
 
 ## **Overview**
 
-This Python script updates a BIDS-compliant JSON sidecar file using metadata extracted from:
 
-- JSON sidecar files as the primary source.
-- DICOM files (as fallback).
-- Optional Exam Card files (specific to Philips scanners).
-
-The script calculates and updates additional metadata fields such as `SliceTiming`, `TotalReadoutTime`, `EffectiveEchoSpacing`, and `PhaseEncodingDirection`.
+This script facilitates the conversion of DICOM files to NIfTI format and ensures the resulting JSON sidecar is compliant with BIDS (Brain Imaging Data Structure) metadata standards.
 
 ---
 
-## **Features**
+## Author
+
+**Gabriele Amorosino** (gabriele.amorosino@utexas.edu)
+
+---
+
+### Key aspects:
+
+1. **DICOM to NIfTI Conversion**:
+   - Leverages `dcm2niix` to convert DICOM files to NIfTI format efficiently.
+   - Outputs a `.nii` file along with a corresponding `.json` metadata sidecar.
+
+2. **BIDS Metadata Compliance**:
+   - Automatically updates the JSON sidecar to include required and optional BIDS fields.
+   - Incorporates metadata from DICOM files, JSON sidecars, and optionally, scanner-specific Exam Cards (e.g., for Philips).
+
+3. **Standalone Metadata Update**:
+   - Provides a script to update an existing NIfTI JSON sidecar file with metadata from its corresponding DICOM file.
+   - Ideal for cases where the NIfTI file already exists but the metadata requires enhancement or compliance adjustments.
+
+4. **Metadata Enhancements**:
+   - Computes missing fields like `SliceTiming`, `TotalReadoutTime`, `EffectiveEchoSpacing`, and `PhaseEncodingDirection` using the provided metadata sources.
+  
+### **Metadata Update Features**
 
 1. **Metadata Extraction Hierarchy**:
    - Retrieves metadata (e.g., `RepetitionTime`, `PhaseEncodingSteps`, `NumberOfSlices`, `MultiBandFactor`) from the JSON file as the primary source.
@@ -43,215 +61,111 @@ The script calculates and updates additional metadata fields such as `SliceTimin
      - `EffectiveEchoSpacing`
      - `PhaseEncodingDirection`
 
----
 
+---
 
 ## **Installation Guide**
 
-To initialize the repository and install all required dependencies, follow the steps below:
+To set up the repository and install dependencies:
 
-### **Step 1: Clone the Repository**
+### Step 1: Clone the Repository
 
 ```bash
 git clone <repository-url>
 cd <repository-folder>
 ```
 
-Replace `<repository-url>` and `<repository-folder>` with your actual repository URL and folder name.
+### Step 2: Install Dependencies
 
----
-
-### **Step 2: Create the `requirements.txt` File**
-
-Ensure your repository has a `requirements.txt` file. Use the content below:
-
-```text
-asttokens==2.0.5
-backcall==0.2.0
-decorator==5.1.1
-exceptiongroup==1.2.0
-executing==0.8.3
-importlib-resources==6.4.5
-ipython==8.15.0
-jedi==0.19.2
-matplotlib-inline==0.1.6
-nibabel==5.3.2
-numpy==2.0.2
-packaging==24.2
-parso==0.8.4
-pexpect==4.8.0
-pickleshare==0.7.5
-pip==24.3.1
-prompt-toolkit==3.0.43
-ptyprocess==0.7.0
-pure-eval==0.2.2
-pydicom==2.4.4
-Pygments==2.15.1
-setuptools==75.6.0
-six==1.16.0
-stack-data==0.2.0
-traitlets==5.14.3
-typing-extensions==4.12.2
-wcwidth==0.2.5
-zipp==3.21.0
-attrs==24.2.0
-jsonschema==4.23.0
-jsonschema-specifications==2024.10.1
-referencing==0.35.1
-rpds-py==0.22.3
-```
-
----
-
-### **Step 3: Install Dependencies**
-
-Create a virtual environment and install the dependencies:
+Create a virtual environment and install required packages:
 
 ```bash
 python3 -m venv env
 source env/bin/activate  # For Linux/macOS
-env\Scripts\activate     # For Windows
+env\Scripts\activate   # For Windows
 
 pip install -r requirements.txt
 ```
 
 ---
 
-### **Step 4: Verify the Installation**
-
-Run the script help command to verify the installation:
-
-```bash
-python update_json_sidecar.py --help
-```
----
-
 ## **Usage**
 
+Run the script to convert DICOM files and update their metadata:
+
 ```bash
-python update_json_sidecar.py <dicom_file> <json_file> <output_file> <exam_card_file> [--compute-slice-timing] [--slice-order <slice_order>]
+python dcm_convert.py <dicom_file> <output_dir> [options]
 ```
 
-### **Arguments**
+Or use the standalone script to update an existing NIfTI JSON sidecar:
 
-- `<dicom_file>`: Path to the input DICOM file.
-- `<json_file>`: Path to the input JSON sidecar file.
+```bash
+python update_json_sidecar.py <dicom_file> <json_file> <output_file> [options]
+```
+
+### Arguments
+
+For `dcm_convert.py`:
+
+- `<dicom_file>`: Path to the DICOM file or directory.
+- `<output_dir>`: Directory where the converted NIfTI and updated JSON files will be saved.
+
+For `update_json_sidecar.py`:
+
+- `<dicom_file>`: Path to the DICOM file.
+- `<json_file>`: Path to the existing JSON sidecar file.
 - `<output_file>`: Path to save the updated JSON file.
-- `<exam_card_file>`: Path to the Exam Card file for additional metadata (optional).
 
-### **Options**
+### Options
 
-- `--compute-slice-timing`: Enable the calculation of `SliceTiming`.
-- `--slice-order`: Provide a custom slice order as a string representation of a list of lists.
-   - Example:
-     ```bash
-     --slice-order "[[0, 4, 8], [1, 5, 9], [2, 6, 10]]"
-     ```
+- `--exam-card`: Path to the Exam Card file (Philips scanners) for additional metadata.
+- `--compute-slice-timing`: Enable calculation of `SliceTiming`.
+- `--compute-total-readout`: Enable calculation of `TotalReadoutTime`.
+- `--slice-order`: Provide a custom slice acquisition order (as a JSON string).
+- `--tmp-dir`: Specify a temporary directory for intermediate processing.
+- `--scanner-type`: Define the scanner type (default: "Philips").
 
 ---
 
-## **Example Workflow**
+## **Example Usage**
 
-### **Basic Usage**
+### Basic Conversion
 
 ```bash
-python update_json_sidecar.py example.dcm example.json updated_example.json exam_card.txt --compute-slice-timing
+python dcm_convert.py example_dicom_folder output_directory
 ```
 
-### **Custom Slice Order**
+### Advanced Usage with Metadata Fixes
 
 ```bash
-python update_json_sidecar.py example.dcm example.json updated_example.json exam_card.txt --slice-order "[[0, 18, 36], [4, 22, 40]]"
+python dcm_convert.py example_dicom_folder output_directory --compute-slice-timing --exam-card exam_card.txt --slice-order "[[0, 4, 8], [1, 5, 9], [2, 6, 10]]"
+```
+
+### Standalone Metadata Update
+
+```bash
+python update_json_sidecar.py example.dcm existing_metadata.json updated_metadata.json --compute-slice-timing --slice-order "[[0, 4, 8], [1, 5, 9], [2, 6, 10]]"
 ```
 
 ---
 
-## **Function Descriptions**
+## **Key Updates in This Version**
 
-### 1. **`calculate_slice_timing`**
-
-```python
-def calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr)
-```
-
-- **Purpose**: Calculates the slice timing based on the TR, number of slices, and slice order.
-- **Inputs**:
-   - `tr`: Repetition time (ms).
-   - `num_slices`: Total number of slices.
-   - `mb_factor`: Multi-band factor.
-   - `slice_order`: Slice acquisition order.
-   - `sets_per_tr`: Number of sets per TR.
-- **Output**: List of slice timings in seconds.
-
----
-
-### 2. **`calculate_correct_slice_order`**
-
-```python
-def calculate_correct_slice_order(num_slices, mb_factor)
-```
-
-- **Purpose**: Computes the correct interleaved slice acquisition order for MB acquisitions.
-- **Inputs**:
-   - `num_slices`: Total number of slices.
-   - `mb_factor`: Multi-band factor.
-- **Output**: List of lists representing the slice acquisition order.
-
----
-
-### 3. **`parse_tr_from_exam_card`**
-
-```python
-def parse_tr_from_exam_card(protocol_details)
-```
-
-- **Purpose**: Parses the TR (Repetition Time) from the Exam Card file, handling various formats such as `Act. TR/TE (ms): 1500 / 30`.
-- **Inputs**:
-   - `protocol_details`: Text content of the Exam Card file.
-- **Output**: TR value in milliseconds.
-
----
-
-### 4. **`update_json_with_dicom_info`**
-
-```python
-def update_json_with_dicom_info(dicom_path, json_path, output_path, ...)
-```
-
-- **Purpose**: Updates the JSON sidecar file with the following metadata:
+1. Integrated DICOM to NIfTI conversion using `dcm2niix`.
+2. Automated JSON sidecar updates to align with BIDS metadata requirements.
+3. Added support for advanced metadata calculations:
    - `SliceTiming`
    - `TotalReadoutTime`
-   - `EffectiveEchoSpacing`
    - `PhaseEncodingDirection`
-- **Metadata Source Hierarchy**:
-   1. JSON file (primary source).
-   2. DICOM file (fallback).
-   3. Exam Card file (for missing values, e.g., TR).
-- **Inputs**:
-   - `dicom_path`: Path to the DICOM file.
-   - `json_path`: Path to the input JSON sidecar.
-   - `output_path`: Path to save the updated JSON file.
-   - Additional flags for slice timing and manual slice order.
-
----
-
-## **Updates in Version**
-
-1. **Fallback to JSON for Metadata**:
-   - Retrieves key parameters like `PhaseEncodingSteps`, `EffectiveEchoSpacing`, `RepetitionTime`, `NumberOfSlices`, and `MultiBandFactor` directly from the JSON file.
-
-2. **Improved Exam Card TR Parsing**:
-   - Handles multiple TR formats, e.g., `1500 / 30` or `3200`.
-
-3. **Robust Slice Order Calculation**:
-   - Efficient interleaved group generation for MB acquisitions.
-
-4. **Extensive Logging**:
-   - Prints extracted and calculated parameters (e.g., `TR`, `Slice Order`, `Total Readout Time`).
+   - `EffectiveEchoSpacing`
+4. Provided a standalone script for updating existing JSON sidecar files.
+5. Enhanced usability through optional parameters for scanner-specific metadata (e.g., Exam Cards).
 
 ---
 
 ## **Notes**
 
-- Use `--compute-slice-timing` to enable `SliceTiming` calculation.
-- Include the Exam Card file for Philips scanners to provide missing parameters like `TR` or `MB Factor`.
+- Ensure `dcm2niix` is installed and accessible in your system's PATH.
+- Use the `--exam-card` option for Philips scanners to improve metadata accuracy.
+- This script supports both individual DICOM files and directories containing multiple DICOMs.
+
