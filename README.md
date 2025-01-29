@@ -124,6 +124,7 @@ For `update_json_sidecar.py`:
 - `--slice-order`: Provide a custom slice acquisition order (as a JSON string).
 - `--tmp-dir`: Specify a temporary directory for intermediate processing.
 - `--scanner-type`: Define the scanner type (default: "Philips").
+- `--flip-phase-encoding-direction`: Toggle the sign of the phase encoding direction.
 
 ---
 
