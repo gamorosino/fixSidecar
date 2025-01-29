@@ -1,3 +1,17 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Oct 21 17:05:44 2024
+
+#########################################################################################################################
+#########################################################################################################################
+################### Author:          Gabriele Amorosino                                               ###################
+################### Contact:         gabriele.amorosino@utexas.edu                                    ###################
+#########################################################################################################################
+#########################################################################################################################
+"""
+
+
 import pydicom
 import json
 import numpy as np
@@ -7,7 +21,7 @@ import re
 
 def calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr):
     """Calculate slice timing based on acquisition parameters."""
-    set_interval = (tr / 1000) / sets_per_tr  # Convert TR from ms to seconds
+    set_interval = tr / sets_per_tr  # Convert TR from ms to seconds
     slice_timing = np.zeros(num_slices)
     
     for i, slice_group in enumerate(slice_order):
@@ -82,6 +96,25 @@ def calculate_total_readout_time(phase_encoding_steps, effective_echo_spacing):
     return (phase_encoding_steps - 1) * effective_echo_spacing
 
 
+def calculate_total_readout_time_from_philips(dicom_data, json_data):
+    """Calculate Total Readout Time using Chris Rorden's Philips formula."""
+    water_fat_shift = json_data.get("WaterFatShift", None) or dicom_data.get((2001, 1022), None)
+    imaging_frequency = json_data.get("ImagingFrequency", None) or dicom_data.get((0x0018, 0x0084), None)
+    epi_factor = json_data.get("EchoTrainLength", None) or dicom_data.get((2001, 1013), None)
+    recon_matrix_pe = json_data.get("ReconMatrixPE", None)
+
+    if not all([water_fat_shift, imaging_frequency, epi_factor, recon_matrix_pe]):
+        print("Insufficient data to calculate Total Readout Time using Philips formula.")
+        return None, None
+
+    try:
+        effective_echo_spacing = water_fat_shift / (imaging_frequency * (epi_factor + 1) * 3.4)
+        total_readout_time = effective_echo_spacing * (recon_matrix_pe - 1)
+        return effective_echo_spacing, total_readout_time
+    except Exception as e:
+        print(f"Error calculating Philips Total Readout Time: {e}")
+        return None, None
+
 def calculate_total_readout_time_from_exam_card(protocol_details):
     """Calculate Total Readout Time using EPI factor and bandwidth from exam card."""
     epi_factor = None
@@ -101,7 +134,7 @@ def calculate_total_readout_time_from_exam_card(protocol_details):
     # Calculate Total Readout Time
     total_readout_time = (epi_factor - 1) * effective_echo_spacing
     total_readout_time = round(total_readout_time, 6)  # Optional: rounding for better precision
-    return total_readout_time
+    return effective_echo_spacing, total_readout_time
 
 
 
@@ -142,7 +175,7 @@ def extract_parameters_from_exam_card(protocol_details):
     return tr, num_slices, mb_factor
 
 
-def determine_phase_encoding_direction(dicom_path, scanner_type="SIEMENS", exam_card_path=None):
+def determine_phase_encoding_direction(dicom_path, scanner_type="SIEMENS", exam_card_path=None, flip_phase=False):
     """Determine BIDS PhaseEncodingDirection from DICOM or Exam Card, supporting SIEMENS and PHILIPS."""
     rowcol_to_niftidim = {'COL': 'j', 'ROW': 'i'}
 
@@ -162,45 +195,90 @@ def determine_phase_encoding_direction(dicom_path, scanner_type="SIEMENS", exam_
                     fat_shift_dir = line.split(":")[-1].strip().upper()
 
             if fat_shift_dir == "A":
-                return "j"
+                pe_dir = "j"
             elif fat_shift_dir == "P":
-                return "j-"
-            if prep_dir == "AP":
-                return "j-"
+                pe_dir = "j-"
+            elif prep_dir == "AP":
+                pe_dir = "j-"
             elif prep_dir == "PA":
-                return "j"
+                pe_dir = "j"
             elif prep_dir == "LR":
-                return "i-"
+                pe_dir = "i-"
             elif prep_dir == "RL":
-                return "i"
+                pe_dir = "i"
+            else:
+                pe_dir = None
+
+            if pe_dir:
+                if flip_phase:
+                    pe_dir = pe_dir[:-1] if pe_dir.endswith("-") else pe_dir + "-"
+
+                return pe_dir
 
     inplane_pe_dir = ds.get((0x0018, 0x1312), None)
     if inplane_pe_dir is None:
         raise ValueError(f"InPlanePhaseEncodingDirection not found in DICOM for SeriesDescription: '{series_description}'")
 
-    inplane_pe_dir = inplane_pe_dir.value
-    return f"{rowcol_to_niftidim[inplane_pe_dir]}"
+    inplane_pe_dir = rowcol_to_niftidim[inplane_pe_dir.value]
+    if flip_phase:
+        inplane_pe_dir = inplane_pe_dir + "-" if "-" not in inplane_pe_dir else inplane_pe_dir[:-1]
+
+    return inplane_pe_dir
 
 
-def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_total_readout=False, scanner_type="SIEMENS", exam_card_path=None, compute_slice_timing=False, user_slice_order=None):
+def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_total_readout=False, scanner_type="SIEMENS", exam_card_path=None, compute_slice_timing=False, user_slice_order=None, flip_phase=False):
     # Read the DICOM file
     ds = pydicom.dcmread(dicom_path)
     with open(json_path, 'r') as f:
         json_data = json.load(f)    
-    phase_encoding_steps = int(json_data.get("PhaseEncodingSteps", 95))
-    effective_echo_spacing = float(json_data.get("EffectiveEchoSpacing", 0.000593))
-    tr = float(json_data.get("RepetitionTime", 0))*1000
-    num_slices = int(json_data.get("NumberOfSlices", 0))
-    mb_factor = int(json_data.get("MultiBandFactor", 0))
+    phase_encoding_steps = int(json_data.get("PhaseEncodingSteps", None))
+    effective_echo_spacing = float(json_data.get("EstimatedEffectiveEchoSpacing", None))
+    tr = float(json_data.get("RepetitionTime", None))
+    if tr: tr=tr
+    num_slices = json_data.get("NumberOfSlices", None)
+    if num_slices: num_slices=int(num_slices)
+    mb_factor = json_data.get("MultiBandFactor", None)
+    if mb_factor: mb_factor=int(mb_factor)
     series_description = ds.get("SeriesDescription", "Unknown").strip()
+
+    print('Read information from provided json file...')
+    print("tr: ",tr)
+    print("num_slices: ",num_slices)
+    print("mb_factor: ",mb_factor)
+    print("effective_echo_spacing: ",effective_echo_spacing)
+    print("phase_encoding_steps: ",phase_encoding_steps)
+
+
     # If parameters are missing, fallback to DICOM
-    if not tr or not num_slices or not mb_factor:
+    if not tr or not num_slices or not mb_factor or not effective_echo_spacing or not phase_encoding_steps:
         ds = pydicom.dcmread(dicom_path)
-        phase_encoding_steps = int(getattr(ds, "PhaseEncodingSteps", phase_encoding_steps))
-        effective_echo_spacing = float(getattr(ds, "EffectiveEchoSpacing", effective_echo_spacing))
+
+    if not tr :
         tr = int(getattr(ds, "RepetitionTime", tr))
-        num_slices = int(getattr(ds, "NumberOfSlices", num_slices))
-        mb_factor = int(getattr(ds, "MultiBandFactor", mb_factor))
+    
+    if not num_slices :
+        num_slices = getattr(ds, "NumberOfSlices", num_slices)
+        if num_slices: num_slices=int(num_slices)
+    
+    if not mb_factor :
+        mb_factor = getattr(ds, "MultiBandFactor", mb_factor)
+        if mb_factor: mb_factor=int(mb_factor)
+    
+    if not effective_echo_spacing :
+        effective_echo_spacing = getattr(ds, "EffectiveEchoSpacing", effective_echo_spacing)
+        if effective_echo_spacing: effective_echo_spacing=float(effective_echo_spacing)
+    if not phase_encoding_steps:
+        
+        phase_encoding_steps = getattr(ds, "PhaseEncodingSteps", phase_encoding_steps)
+        if phase_encoding_steps: phase_encoding_steps=int(phase_encoding_steps)
+
+    print('Read information from dicom file...')
+    print("tr: ",tr)
+    print("num_slices: ",num_slices)
+    print("mb_factor: ",mb_factor)
+    print("effective_echo_spacing: ",effective_echo_spacing)
+    print("phase_encoding_steps: ",phase_encoding_steps)
+
 
     # Fallback to exam card if parameters are missing
     if not tr or not num_slices or not mb_factor:
@@ -224,7 +302,7 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
     if not mb_factor:
         mb_factor = 1
 
-
+    print('Read information from exam card file...')
     print("tr: ",tr)
     print("num_slices: ",num_slices)
     print("mb_factor: ",mb_factor)
@@ -246,26 +324,47 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
         slice_timing = calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr)
 
     # Determine Phase Encoding Direction
-    bids_phase_encoding_direction = determine_phase_encoding_direction(dicom_path, scanner_type, exam_card_path)
+    bids_phase_encoding_direction = determine_phase_encoding_direction(dicom_path, scanner_type, exam_card_path, flip_phase=flip_phase)
 
     # Calculate Total Readout Time
-    if exam_card_path:
-        protocol_details = match_protocol_in_exam_card(ds.get("SeriesDescription", "Unknown"), exam_card_path)
 
     if calculate_total_readout:
+
+        if exam_card_path:
+            protocol_details = match_protocol_in_exam_card(ds.get("SeriesDescription", "Unknown"), exam_card_path)
+
+        # Calculate Total Readout Time
+        effective_echo_spacing_philips, total_readout_time_philips = calculate_total_readout_time_from_philips(ds, json_data)
+
+        print("Calculate Total Readout Time")
         if protocol_details:
-            total_readout_time = calculate_total_readout_time_from_exam_card(protocol_details)
+            effective_echo_spacing_exame, total_readout_time = calculate_total_readout_time_from_exam_card(protocol_details)
+        
+            if effective_echo_spacing == 0 :
+                
+                print("Effective echo spacing is missing from the provided JSON file. The value will be estimated based on the exam card settings.")
+                effective_echo_spacing=effective_echo_spacing_exame
+        
+        elif total_readout_time_philips is not None:
+            total_readout_time = total_readout_time_philips
+            if effective_echo_spacing == 0 :
+                
+                print("Effective echo spacing is missing from the provided JSON file. The value will be estimated based on the dicom header info.")
+                effective_echo_spacing=effective_echo_spacing_philips
         else:
-            # Ensure Effective Echo Spacing is in seconds
-            if effective_echo_spacing > 1:  # Assuming it might be in ms
-                effective_echo_spacing /= 1000
-            total_readout_time = calculate_total_readout_time(phase_encoding_steps, effective_echo_spacing)
+            if effective_echo_spacing is not None:
+                total_readout_time = calculate_total_readout_time(phase_encoding_steps, effective_echo_spacing)
+            else:
+                ValueError("Effective echo spacing is missing from the provided JSON file.")
     else:
         total_readout_time = float(json_data.get("EstimatedTotalReadoutTime", None))
+        print('Set Total Readout Time as EstimatedTotalReadoutTime field of json file')
         if total_readout_time is None:
             total_readout_time = float(ds.get("EstimatedTotalReadoutTime", None))
+        if total_readout_time is None:
+            ValueError('EstimatedTotalReadoutTime missed from json file...')
     if total_readout_time and total_readout_time > 1:  # Convert from ms to seconds if necessary
-            total_readout_time /= 1000
+            total_readout_time /= 100
 
 
     # Update JSON
@@ -302,14 +401,14 @@ Options:
 
 
 if __name__ == '__main__':
-    if len(sys.argv) < 5:
+    if len(sys.argv) < 4:
         print_help()
         sys.exit(1)
 
     dicom_file = sys.argv[1]
     json_file = sys.argv[2]
     output_file = sys.argv[3]
-    exam_card_file = sys.argv[4]
+    exam_card_file = sys.argv[4] if len(sys.argv) > 4 else None
 
     compute_slice_timing = "--compute-slice-timing" in sys.argv
     slice_order_arg = None
@@ -319,7 +418,7 @@ if __name__ == '__main__':
         except IndexError:
             print("Error: --slice-order requires a slice order as its argument.")
             sys.exit(1)
-
+    flip_phase = "--flip-phase" in sys.argv
     update_json_with_dicom_info(
         dicom_file,
         json_file,
@@ -329,4 +428,5 @@ if __name__ == '__main__':
         exam_card_path=exam_card_file,
         compute_slice_timing=compute_slice_timing,
         user_slice_order=slice_order_arg,
+        flip_phase=flip_phase
     )
