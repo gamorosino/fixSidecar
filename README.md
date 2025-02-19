@@ -2,7 +2,6 @@
 
 ## **Overview**
 
-
 This script facilitates the conversion of DICOM files to NIfTI format and ensures the resulting JSON sidecar is compliant with BIDS (Brain Imaging Data Structure) metadata standards.
 
 ---
@@ -61,7 +60,6 @@ This script facilitates the conversion of DICOM files to NIfTI format and ensure
      - `EffectiveEchoSpacing`
      - `PhaseEncodingDirection`
 
-
 ---
 
 ## **Installation Guide**
@@ -77,6 +75,8 @@ cd <repository-folder>
 
 ### Step 2: Install Dependencies
 
+#### Using Virtual Environment
+
 Create a virtual environment and install required packages:
 
 ```bash
@@ -85,6 +85,15 @@ source env/bin/activate  # For Linux/macOS
 env\Scripts\activate   # For Windows
 
 pip install -r requirements.txt
+```
+
+#### Using Conda
+
+Alternatively, you can create an environment using Conda:
+
+```bash
+conda env create -f res/config/fixSidecar.yml
+conda activate fixSidecar
 ```
 
 ---
