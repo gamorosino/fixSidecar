@@ -42,7 +42,7 @@ import subprocess
 import argparse
 from update_json_sidecar import update_json_with_dicom_info
 
-def convert_dicom_to_nifti(dicom_file, output_dir, tmp_dir=None):
+def convert_dicom_to_nifti(dicom_file: str, output_dir: str, tmp_dir: str = None):
     """
     Converts DICOM to NIfTI format using dcm2niix and stores results in output_dir.
 
@@ -66,6 +66,12 @@ def convert_dicom_to_nifti(dicom_file, output_dir, tmp_dir=None):
         os.makedirs(tmp_dir, exist_ok=True)
         cleanup_tmp = False
 
+    print(f"Using temporary directory: {tmp_dir}")
+
+    # Create a subdirectory for dcm2niix output
+    temp_output_dir = os.path.join(tmp_dir, "nifti_output")
+    os.makedirs(temp_output_dir, exist_ok=True)
+
     try:
         # Copy DICOM file(s) to temporary directory
         dicom_basename = os.path.basename(dicom_file)
@@ -75,28 +81,37 @@ def convert_dicom_to_nifti(dicom_file, output_dir, tmp_dir=None):
         else:
             shutil.copy(dicom_file, tmp_dicom_path)
 
-        # Run dcm2niix
+        # Run dcm2niix and output to temp_output_dir
         subprocess.run(
-            ["dcm2niix", "-o", output_dir, "-z", "n", "-v", "y", "-f", "%p", tmp_dicom_path],
+            ["dcm2niix", "-o", temp_output_dir, "-z", "n", "-v", "y", "-f", "%p", tmp_dicom_path],
             check=True
         )
 
-        # Identify generated NIfTI and JSON files
-        nifti_files = [f for f in os.listdir(output_dir) if f.endswith(".nii")]
-        json_files = [f for f in os.listdir(output_dir) if f.endswith(".json")]
-
+        # Identify generated NIfTI and JSON files in temp_output_dir
+        nifti_files = [f for f in os.listdir(temp_output_dir) if f.endswith(".nii")]
+        json_files = [f for f in os.listdir(temp_output_dir) if f.endswith(".json")]
         if not nifti_files or not json_files:
-            raise FileNotFoundError("NIfTI or JSON files were not generated in the output directory.")
+            raise FileNotFoundError("NIfTI or JSON files were not generated in the temporary directory.")
 
-        nifti_file = os.path.join(output_dir, nifti_files[0])
-        json_file = os.path.join(output_dir, json_files[0])
+        nifti_file = os.path.join(temp_output_dir, nifti_files[0])
+        json_file = os.path.join(temp_output_dir, json_files[0])
+        
+        # Move the files to the output directory
+        final_nifti_path = os.path.join(output_dir, os.path.basename(nifti_file))
+        final_json_path = os.path.join(output_dir, os.path.basename(json_file))
+        shutil.move(nifti_file, final_nifti_path)
+        shutil.move(json_file, final_json_path)
 
-        return nifti_file, json_file
+        print(f"NIfTI file moved to: {final_nifti_path}")
+        print(f"JSON file moved to: {final_json_path}")
+
+        return final_nifti_path, final_json_path
 
     finally:
         # Clean up temporary directory if created by this function
         if cleanup_tmp:
-            shutil.rmtree(tmp_dir)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            print(f"Temporary directory {tmp_dir} cleaned up.")
 
 def main():
     parser = argparse.ArgumentParser(description="Convert DICOM to NIfTI and update JSON sidecar.")
