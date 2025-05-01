@@ -159,17 +159,20 @@ python update_json_sidecar.py example.dcm existing_metadata.json updated_metadat
 
 ---
 
-## **Key Updates in This Version**
+## **New Features in this version**
 
-1. Integrated DICOM to NIfTI conversion using `dcm2niix`.
-2. Automated JSON sidecar updates to align with BIDS metadata requirements.
-3. Added support for advanced metadata calculations:
-   - `SliceTiming`
-   - `TotalReadoutTime`
-   - `PhaseEncodingDirection`
-   - `EffectiveEchoSpacing`
-4. Provided a standalone script for updating existing JSON sidecar files.
-5. Enhanced usability through optional parameters for scanner-specific metadata (e.g., Exam Cards).
+- **Manual Phase Encoding Direction**
+
+  - Added support for the `--phase-encoding-direction` flag to both `dcm_convert.py` and `update_json_sidecar.py`.
+  - This option allows users to manually specify the `PhaseEncodingDirection` (e.g., "j", "-j", "i", "-i").
+  - If this option is used, automatic computation from DICOM or ExamCard is skipped.
+  - The output JSON will include a new metadata field: `PhaseEncodingDirectionSource`, which will be set to either `"manual"` or `"computed"` depending on how the direction was determined.
+
+- **Fallback Estimation from NIfTI**
+
+  - If `PhaseEncodingSteps` or `NumberOfSlices` are not found in the JSON, DICOM headers, or ExamCard, the values are automatically estimated from the corresponding NIfTI image file.
+  - This increases robustness when metadata is incomplete or inconsistently exported.
+
 
 ---
 
