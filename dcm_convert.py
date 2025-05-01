@@ -122,6 +122,8 @@ def main():
     parser.add_argument("--tmp-dir", help="Optional temporary directory for processing.", default=None)
     parser.add_argument("--scanner-type", help="Scanner type (default: 'Philips').", default="Philips")
     parser.add_argument("--flip-phase-encoding-direction", help="Toggle the sign of the phase encoding direction.", action="store_true")
+    parser.add_argument("--verbose", help="Enable verbose output.", action="store_true")
+    parser.add_argument("--phase-encoding-direction", help="Manually provide the BIDS PhaseEncodingDirection (e.g., j, j-, i, i-)", default=None)
     args = parser.parse_args()
 
     # Step 1: Convert DICOM to NIfTI
@@ -137,7 +139,9 @@ def main():
         user_slice_order=args.slice_order,
         scanner_type=args.scanner_type,
         calculate_total_readout=args.compute_total_readout,
-        flip_phase=args.flip_phase_encoding_direction
+        flip_phase=args.flip_phase_encoding_direction,
+        verbose=args.verbose,
+        user_phase_encoding_direction=args.phase_encoding_direction
     )
 
 if __name__ == "__main__":

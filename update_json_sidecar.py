@@ -18,7 +18,81 @@ import numpy as np
 import sys
 import ast
 import re
+from pydicom.errors import InvalidDicomError
+import os
+import nibabel as nib
 
+def estimate_phase_encoding_steps_from_nifti(nifti_path, json_path):
+    """Estimate PhaseEncodingSteps based on PhaseEncodingDirection and NIfTI dimensions."""
+    try:
+        img = nib.load(nifti_path)
+        dims = img.shape
+        with open(json_path) as f:
+            metadata = json.load(f)
+        pe_dir = metadata.get("PhaseEncodingDirection", "j")
+        if pe_dir.startswith("i"):
+            return dims[0]
+        elif pe_dir.startswith("j"):
+            return dims[1]
+        elif pe_dir.startswith("k") and len(dims) >= 3:
+            return dims[2]
+    except Exception as e:
+        print(f"Error estimating PhaseEncodingSteps from NIfTI: {e}")
+    return None
+
+def estimate_num_slices_from_nifti(nifti_path):
+    """Estimate number of slices from a NIfTI file by reading the third dimension."""
+    try:
+        img = nib.load(nifti_path)
+        dims = img.shape
+        if len(dims) >= 3:
+            return dims[2]
+    except Exception as e:
+        print(f"Error reading NIfTI file: {nifti_path}. Error: {e}")
+    return None
+
+def read_dicom(dicom_path):
+    """
+    Reads a DICOM file from the given path. If the path is a directory,
+    it searches for the first valid DICOM file within that directory.
+
+    Parameters:
+    dicom_path (str): Path to a DICOM file or a directory containing DICOM files.
+
+    Returns:
+    pydicom.dataset.FileDataset: The first valid DICOM dataset found.
+    None: If no valid DICOM file is found or an error occurs.
+    """
+    if os.path.isfile(dicom_path):
+        try:
+            return pydicom.dcmread(dicom_path)
+        except InvalidDicomError as e:
+            print(f"Invalid DICOM file: {dicom_path}. Error: {e}")
+            return None
+        except Exception as e:
+            print(f"Error reading file {dicom_path}: {e}")
+            return None
+    elif os.path.isdir(dicom_path):
+        try:
+            for filename in os.listdir(dicom_path):
+                file_path = os.path.join(dicom_path, filename)
+                if os.path.isfile(file_path):
+                    try:
+                        return pydicom.dcmread(file_path)
+                    except InvalidDicomError:
+                        continue  # Not a valid DICOM file; try the next file
+                    except Exception as e:
+                        print(f"Error reading file {file_path}: {e}")
+                        continue
+            print(f"No valid DICOM files found in directory: {dicom_path}")
+            return None
+        except Exception as e:
+            print(f"Error accessing directory {dicom_path}: {e}")
+            return None
+    else:
+        print(f"The provided path is neither a file nor a directory: {dicom_path}")
+        return None
+    
 def calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr):
     """Calculate slice timing based on acquisition parameters."""
     set_interval = tr / sets_per_tr  # Convert TR from ms to seconds
@@ -180,7 +254,7 @@ def determine_phase_encoding_direction(dicom_path, scanner_type="SIEMENS", exam_
     rowcol_to_niftidim = {'COL': 'j', 'ROW': 'i'}
 
     # Read DICOM
-    ds = pydicom.dcmread(dicom_path)
+    ds = read_dicom(dicom_path)
     series_description = ds.get("SeriesDescription", "Unknown").strip()
 
     if exam_card_path:
@@ -226,12 +300,13 @@ def determine_phase_encoding_direction(dicom_path, scanner_type="SIEMENS", exam_
     return inplane_pe_dir
 
 
-def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_total_readout=False, scanner_type="SIEMENS", exam_card_path=None, compute_slice_timing=False, user_slice_order=None, flip_phase=False):
+def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_total_readout=False, scanner_type="SIEMENS", exam_card_path=None, compute_slice_timing=False, user_slice_order=None, flip_phase=False, verbose=False, user_phase_encoding_direction=None):
     # Read the DICOM file
-    ds = pydicom.dcmread(dicom_path)
+    ds = read_dicom(dicom_path)
     with open(json_path, 'r') as f:
         json_data = json.load(f)    
-    phase_encoding_steps = int(json_data.get("PhaseEncodingSteps", None))
+    phase_encoding_steps = json_data.get("PhaseEncodingSteps", None)
+    if phase_encoding_steps is not None: phase_encoding_steps=int(phase_encoding_steps)
     effective_echo_spacing = float(json_data.get("EstimatedEffectiveEchoSpacing", None))
     tr = float(json_data.get("RepetitionTime", None))
     if tr: tr=tr
@@ -242,16 +317,17 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
     series_description = ds.get("SeriesDescription", "Unknown").strip()
 
     print('Read information from provided json file...')
-    print("tr: ",tr)
-    print("num_slices: ",num_slices)
-    print("mb_factor: ",mb_factor)
-    print("effective_echo_spacing: ",effective_echo_spacing)
-    print("phase_encoding_steps: ",phase_encoding_steps)
+    if verbose:
+        print("tr: ",tr)
+        print("num_slices: ",num_slices)
+        print("mb_factor: ",mb_factor)
+        print("effective_echo_spacing: ",effective_echo_spacing)
+        print("phase_encoding_steps: ",phase_encoding_steps)
 
 
     # If parameters are missing, fallback to DICOM
     if not tr or not num_slices or not mb_factor or not effective_echo_spacing or not phase_encoding_steps:
-        ds = pydicom.dcmread(dicom_path)
+        ds = read_dicom(dicom_path)
 
     if not tr :
         tr = int(getattr(ds, "RepetitionTime", tr))
@@ -272,12 +348,25 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
         phase_encoding_steps = getattr(ds, "PhaseEncodingSteps", phase_encoding_steps)
         if phase_encoding_steps: phase_encoding_steps=int(phase_encoding_steps)
 
+
+    if not phase_encoding_steps:
+        phase_encoding_steps = getattr(ds, "PhaseEncodingSteps", None)
+        if phase_encoding_steps:
+            phase_encoding_steps = int(phase_encoding_steps)
+        else:
+            nifti_path = json_path.replace('.json', '.nii')
+            estimated_steps = estimate_phase_encoding_steps_from_nifti(nifti_path, json_path)
+            if estimated_steps:
+                print(f"Estimated PhaseEncodingSteps from NIfTI: {estimated_steps}")
+                phase_encoding_steps = estimated_steps
+
     print('Read information from dicom file...')
-    print("tr: ",tr)
-    print("num_slices: ",num_slices)
-    print("mb_factor: ",mb_factor)
-    print("effective_echo_spacing: ",effective_echo_spacing)
-    print("phase_encoding_steps: ",phase_encoding_steps)
+    if verbose:
+        print("tr: ",tr)
+        print("num_slices: ",num_slices)
+        print("mb_factor: ",mb_factor)
+        print("effective_echo_spacing: ",effective_echo_spacing)
+        print("phase_encoding_steps: ",phase_encoding_steps)
 
 
     # Fallback to exam card if parameters are missing
@@ -296,16 +385,26 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
         raise ValueError(f"Repetition Time not found SeriesDescription: '{series_description}'")
 
     if not num_slices:
-        raise ValueError(f"Number of Slices not found SeriesDescription: '{series_description}'")
-
+        num_slices = getattr(ds, "NumberOfSlices", None)
+        if num_slices:
+            num_slices = int(num_slices)
+        else:
+            # Estimate from NIfTI
+            nifti_path = json_path.replace('.json', '.nii')
+            estimated_slices = estimate_num_slices_from_nifti(nifti_path)
+            if estimated_slices:
+                print(f"Estimated number of slices from NIfTI: {estimated_slices}")
+                num_slices = estimated_slices
 
     if not mb_factor:
         mb_factor = 1
 
     print('Read information from exam card file...')
-    print("tr: ",tr)
-    print("num_slices: ",num_slices)
-    print("mb_factor: ",mb_factor)
+
+    if verbose:
+        print("tr: ",tr)
+        print("num_slices: ",num_slices)
+        print("mb_factor: ",mb_factor)
 
 
 
@@ -324,7 +423,13 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
         slice_timing = calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr)
 
     # Determine Phase Encoding Direction
-    bids_phase_encoding_direction = determine_phase_encoding_direction(dicom_path, scanner_type, exam_card_path, flip_phase=flip_phase)
+    if user_phase_encoding_direction:
+        bids_phase_encoding_direction = user_phase_encoding_direction
+        print(f"Using user-provided PhaseEncodingDirection: {bids_phase_encoding_direction}")
+    else:
+        bids_phase_encoding_direction = determine_phase_encoding_direction(
+            dicom_path, scanner_type, exam_card_path, flip_phase=flip_phase
+        )
 
     # Calculate Total Readout Time
 
@@ -377,10 +482,11 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
     json_data["EffectiveEchoSpacing"] = effective_echo_spacing
     json_data["PhaseEncodingDirection"] = bids_phase_encoding_direction
 
-    print("Slice Timing: ",slice_timing)
-    print("Total Readout Time: ",total_readout_time)
-    print("Effective echo spacing: ",effective_echo_spacing)
-    print("Phase Encoding Direction: ",bids_phase_encoding_direction)
+    if verbose:
+        print("Slice Timing: ",slice_timing)
+        print("Total Readout Time: ",total_readout_time)
+        print("Effective echo spacing: ",effective_echo_spacing)
+        print("Phase Encoding Direction: ",bids_phase_encoding_direction)
 
 
     with open(output_path, 'w') as f:
