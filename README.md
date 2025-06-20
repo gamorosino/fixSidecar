@@ -183,3 +183,8 @@ python update_json_sidecar.py example.dcm existing_metadata.json updated_metadat
 - Use the `--exam-card` option for Philips scanners to improve metadata accuracy.
 - This script supports both individual DICOM files and directories containing multiple DICOMs.
 
+---
+
+## Acknowledgments
+This work was supported by the following grant:
+NIH R01HD114489, CRCNS: Dense longitudinal neuroimaging to evaluate learning in childhood (Principal Investigator S. Vinci Booher)
