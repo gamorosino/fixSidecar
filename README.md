@@ -118,6 +118,8 @@ For `dcm_convert.py`:
 
 - `<dicom_file>`: Path to the DICOM file or directory.
 - `<output_dir>`: Directory where the converted NIfTI and updated JSON files will be saved.
+#### Options
+- `--no-fmri`: Skip JSON-sidecar update (useful for structural or non-fMRI data).
 
 For `update_json_sidecar.py`:
 
@@ -125,7 +127,7 @@ For `update_json_sidecar.py`:
 - `<json_file>`: Path to the existing JSON sidecar file.
 - `<output_file>`: Path to save the updated JSON file.
 
-### Options
+#### Options
 
 - `--exam-card`: Path to the Exam Card file (Philips scanners) for additional metadata.
 - `--compute-slice-timing`: Enable calculation of `SliceTiming`.
@@ -135,7 +137,6 @@ For `update_json_sidecar.py`:
 - `--scanner-type`: Define the scanner type (default: "Philips").
 - `--flip-phase-encoding-direction`: Toggle the sign of the phase encoding direction.
 - `--phase-encoding-direction`: Manually provide the BIDS PhaseEncodingDirection (e.g., j, j-, i, i-)
-- `--no-fMRI`: Skip JSON-sidecar update (useful for structural or non-fMRI data).
 
 ---
 
