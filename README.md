@@ -135,6 +135,7 @@ For `update_json_sidecar.py`:
 - `--scanner-type`: Define the scanner type (default: "Philips").
 - `--flip-phase-encoding-direction`: Toggle the sign of the phase encoding direction.
 - `--phase-encoding-direction`: Manually provide the BIDS PhaseEncodingDirection (e.g., j, j-, i, i-)
+- `--no-fMRI`: Skip JSON-sidecar update (useful for structural or non-fMRI data).
 
 ---
 
