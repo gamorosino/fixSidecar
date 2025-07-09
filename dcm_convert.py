@@ -114,9 +114,19 @@ def convert_dicom_to_nifti(dicom_file: str, output_dir: str, tmp_dir: str = None
             print(f"Temporary directory {tmp_dir} cleaned up.")
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert DICOM to NIfTI and update JSON sidecar.")
+    parser = argparse.ArgumentParser(
+        description="Convert DICOM to NIfTI and (optionally) update JSON sidecar."
+    )
     parser.add_argument("dicom_file", help="Path to the DICOM file or directory.")
     parser.add_argument("output_dir", help="Output directory for the NIfTI and JSON files.")
+    # ------------------------------------------------------------------------- #
+    # NEW FLAG: tell the script *not* to touch the JSON sidecar for fMRI data
+    parser.add_argument(
+        "--no-fmri",
+        help="Skip JSON-sidecar update (useful for structural or non-fMRI data).",
+        action="store_true",
+    )
+    # ------------------------------------------------------------------------- #
     parser.add_argument("--exam-card", help="Path to the exam card file.", default=None)
     parser.add_argument("--compute-slice-timing", help="Enable Slice Timing calculation.", action="store_true")
     parser.add_argument("--compute-total-readout", help="Enable Total Readout Time calculation.", action="store_true")
@@ -126,21 +136,24 @@ def main():
     parser.add_argument("--flip-phase-encoding-direction", help="Toggle the sign of the phase encoding direction.", action="store_true")
     args = parser.parse_args()
 
-    # Step 1: Convert DICOM to NIfTI
-    nifti_file, json_file = convert_dicom_to_nifti(args.dicom_file, args.output_dir, tmp_dir=args.tmp_dir)
-
-    # Step 2: Update JSON sidecar
-    update_json_with_dicom_info(
-        dicom_path=args.dicom_file,
-        json_path=json_file,
-        output_path=json_file,
-        exam_card_path=args.exam_card,
-        compute_slice_timing=args.compute_slice_timing,
-        user_slice_order=args.slice_order,
-        scanner_type=args.scanner_type,
-        calculate_total_readout=args.compute_total_readout,
-        flip_phase=args.flip_phase_encoding_direction
+    # Step 1: DICOM → NIfTI
+    nifti_file, json_file = convert_dicom_to_nifti(
+        args.dicom_file, args.output_dir, tmp_dir=args.tmp_dir
     )
+
+    # Step 2: update JSON sidecar unless the user asked not to
+    if not args.no_fmri:
+        update_json_with_dicom_info(
+            dicom_path=args.dicom_file,
+            json_path=json_file,
+            output_path=json_file,
+            exam_card_path=args.exam_card,
+            compute_slice_timing=args.compute_slice_timing,
+            user_slice_order=args.slice_order,
+            scanner_type=args.scanner_type,
+            calculate_total_readout=args.compute_total_readout,
+            flip_phase=args.flip_phase_encoding_direction,
+        )
 
 if __name__ == "__main__":
     main()
