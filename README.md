@@ -187,7 +187,7 @@ python update_json_sidecar.py example.dcm existing_metadata.json updated_metadat
 
 ---
 
-## **Disclamer**
+## **Disclaimer**
 - The script was developed and tested on only data from the Philips 3T Ingenia CX MRI Scanner at the Vanderbilt University Institute of Imaging Sciences (VUIIS) at Vanderbilt University. There may be inaccuracies introduced when applying this script to other MRI scanners; be sure to check all processes and outputs carefully, if applying to data from a different MRI scanner.
 ---
 
