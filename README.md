@@ -181,16 +181,15 @@ conda activate fixSidecar
 ```
 
 ---
-
 # Usage
 
-## Conversion + Harmonization
+Run the script to convert DICOM files and update their metadata:
 
 ```bash
 python dcm_convert.py <dicom_file> <output_dir> [options]
 ```
 
-## Standalone Metadata Update
+Or use the standalone script to update an existing NIfTI JSON sidecar:
 
 ```bash
 python update_json_sidecar.py <dicom_file> <json_file> <output_file> [options]
@@ -198,22 +197,119 @@ python update_json_sidecar.py <dicom_file> <json_file> <output_file> [options]
 
 ---
 
-# CLI Options (v0.7.0)
+# Arguments
 
-### Common Options
+## For `dcm_convert.py`
+
+### Required
+
+* `<dicom_file>`
+  Path to a DICOM file or a directory containing DICOM files.
+
+* `<output_dir>`
+  Directory where the converted NIfTI file and updated JSON sidecar will be saved.
+
+---
+
+### Optional Flags
+
+* `--no-fmri`
+  Skip JSON-sidecar update (useful for structural or non-fMRI data).
+
+* `--exam-card <path>`
+  Path to a Philips Exam Card file for additional metadata extraction.
 
 * `--compute-slice-timing`
-* `--compute-total-readout`
-* `--exam-card`
-* `--scanner-type`
-* `--flip-phase-encoding-direction`
-* `--phase-encoding-direction`
+  Enable calculation of `SliceTiming`.
 
-### Slice-Order Options
+* `--compute-total-readout`
+  Enable calculation of `TotalReadoutTime`.
+
+* `--slice-order "<json_string>"`
+  Provide a custom slice acquisition order as a JSON-formatted string.
+  Example:
+
+  ```bash
+  --slice-order "[[0,12,24],[1,13,25],[2,14,26]]"
+  ```
 
 * `--slice-order-mode legacy|ascending|interleaved|stepped`
+  Automatic slice-order strategy (used only if `--slice-order` is not provided).
+
+  * `legacy` – preserves original lab-specific MB=3 behavior
+  * `ascending` – sequential MB grouping
+  * `interleaved` – even–odd shot ordering
+  * `stepped` – generalized cyclic stepping
+
 * `--slice-order-step <int>`
+  Step size for slice-order calculation.
+  Used for:
+
+  * `slice-order-mode=stepped`
+  * `slice-order-mode=legacy` (defaults to 4 if not specified)
+
+* `--tmp-dir <path>`
+  Specify a temporary directory for intermediate processing.
+
+* `--scanner-type <type>`
+  Define scanner type (default: `"Philips"`).
+
+* `--flip-phase-encoding-direction`
+  Toggle the sign of the inferred phase encoding direction.
+
+* `--phase-encoding-direction <dir>`
+  Manually provide the BIDS `PhaseEncodingDirection`.
+  Examples: `j`, `j-`, `i`, `i-`
+  If provided, automatic inference is skipped and provenance is recorded.
+
+* `--version`
+  Display tool version, Python version, and platform information.
+
+---
+
+## For `update_json_sidecar.py`
+
+### Required
+
+* `<dicom_file>`
+  Path to the DICOM file.
+
+* `<json_file>`
+  Path to the existing JSON sidecar file.
+
+* `<output_file>`
+  Path where the updated JSON file will be written.
+
+---
+
+### Optional Flags
+
+* `--exam-card <path>`
+  Path to a Philips Exam Card file.
+
+* `--compute-slice-timing`
+  Enable calculation of `SliceTiming`.
+
 * `--slice-order "<json_string>"`
+  Provide a custom slice acquisition order (overrides automatic modes).
+
+* `--slice-order-mode legacy|ascending|interleaved|stepped`
+  Automatic slice-order strategy if `--slice-order` is not provided.
+
+* `--slice-order-step <int>`
+  Step size used for:
+
+  * `stepped` mode
+  * `legacy` mode (defaults to 4)
+
+* `--phase-encoding-direction <dir>`
+  Manually specify `PhaseEncodingDirection`.
+
+* `--flip-phase`
+  Toggle the sign of the inferred phase encoding direction.
+
+* `--version`
+  Display script version and system information.
 
 ---
 
