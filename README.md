@@ -2,94 +2,178 @@
 
 ## **Overview**
 
-This script facilitates the conversion of DICOM files to NIfTI format and ensures the resulting JSON sidecar is compliant with BIDS (Brain Imaging Data Structure) metadata standards.
+This tool converts DICOM files to NIfTI format and programmatically harmonizes the resulting JSON sidecar to ensure compliance with BIDS (Brain Imaging Data Structure) metadata standards.
+
+Version **v0.7.0** introduces a generalized and extensible slice-order framework, legacy acquisition preservation, metadata provenance tracking, and improved CLI consistency.
 
 ---
 
 ## Author
 
-**Gabriele Amorosino** (gabriele.amorosino@utexas.edu)
+**Gabriele Amorosino** ([gabriele.amorosino@utexas.edu](mailto:gabriele.amorosino@utexas.edu))
 
 ---
 
-### Key aspects:
+## Key Capabilities
 
-1. **DICOM to NIfTI Conversion**:
-   - Leverages `dcm2niix` to convert DICOM files to NIfTI format efficiently.
-   - Outputs a `.nii` file along with a corresponding `.json` metadata sidecar.
+### 1. DICOM to NIfTI Conversion
 
-2. **BIDS Metadata Compliance**:
-   - Automatically updates the JSON sidecar to include required and optional BIDS fields.
-   - Incorporates metadata from DICOM files, JSON sidecars, and optionally, scanner-specific Exam Cards (e.g., for Philips).
+* Uses `dcm2niix` for robust DICOM → NIfTI conversion.
+* Produces `.nii` images with accompanying `.json` metadata sidecars.
+* Supports both single DICOM files and directory-based acquisitions.
 
-3. **Standalone Metadata Update**:
-   - Provides a script to update an existing NIfTI JSON sidecar file with metadata from its corresponding DICOM file.
-   - Ideal for cases where the NIfTI file already exists but the metadata requires enhancement or compliance adjustments.
+### 2. BIDS Metadata Harmonization
 
-4. **Metadata Enhancements**:
-   - Computes missing fields like `SliceTiming`, `TotalReadoutTime`, `EffectiveEchoSpacing`, and `PhaseEncodingDirection` using the provided metadata sources.
-  
-### **Metadata Update Features**
+* Automatically updates and validates required BIDS fields.
+* Integrates metadata from:
 
-1. **Metadata Extraction Hierarchy**:
-   - Retrieves metadata (e.g., `RepetitionTime`, `PhaseEncodingSteps`, `NumberOfSlices`, `MultiBandFactor`) from the JSON file as the primary source.
-   - Falls back to DICOM metadata if the JSON file lacks necessary information.
-   - Parses additional missing values (like TR) from the Exam Card file.
+  * JSON sidecar (primary source)
+  * DICOM headers (fallback)
+  * Optional Philips Exam Card files
+* Ensures consistent unit handling and structured metadata output.
 
-2. **Slice Timing Calculation**:
-   - Calculates `SliceTiming` based on the TR, number of slices, multi-band factor, and interleaved slice acquisition order.
+### 3. Standalone Metadata Update
 
-3. **Slice Order Calculation**:
-   - Computes the correct interleaved slice acquisition order for MB (Multi-Band) acquisitions.
-   - Allows manual override with user-provided slice orders.
+* `update_json_sidecar.py` allows post-hoc correction of an existing JSON file.
+* Useful when:
 
-4. **Phase Encoding Direction**:
-   - Determines `PhaseEncodingDirection` using:
-     - JSON or DICOM metadata.
-     - Exam Card fields (if available).
+  * Metadata is incomplete
+  * Conversion occurred externally
+  * Additional compliance steps are required
 
-5. **Total Readout Time**:
-   - Computes `TotalReadoutTime` using:
-     - `PhaseEncodingSteps` and `EffectiveEchoSpacing` (from JSON or DICOM).
-     - Exam Card parameters (`EPI factor` and `Bandwidth`).
+### 4. Advanced Metadata Computation
 
-6. **Comprehensive JSON Updates**:
-   - Updates the following fields in the JSON sidecar:
-     - `SliceTiming`
-     - `TotalReadoutTime`
-     - `EffectiveEchoSpacing`
-     - `PhaseEncodingDirection`
+The tool can compute and/or harmonize:
+
+* `SliceTiming`
+* `TotalReadoutTime`
+* `EffectiveEchoSpacing`
+* `PhaseEncodingDirection`
+* `PhaseEncodingDirectionSource` (provenance annotation)
 
 ---
 
-## **Installation Guide**
+# Metadata Update Features (v0.7.0)
 
-To set up the repository and install dependencies:
+## 1. Hierarchical Metadata Resolution
 
-### Step 1: Clone the Repository
+Metadata is resolved in the following order:
+
+1. JSON sidecar (primary)
+2. DICOM header (fallback)
+3. Exam Card (Philips-specific fallback)
+
+This structured hierarchy increases robustness when working with partially exported datasets.
+
+---
+
+## 2. Generalized Slice-Order Framework (NEW in v0.7.0)
+
+v0.7.0 introduces a flexible acquisition modeling system.
+
+### Supported Slice-Order Modes
+
+* `legacy`
+  Preserves original lab-specific acquisition logic (MB=3 protocol).
+
+* `ascending`
+  Standard multi-band grouping in ascending shot order.
+
+* `interleaved`
+  Even–odd shot ordering.
+
+* `stepped`
+  Generalized cyclic stepping with configurable step size.
+
+### Step Size Support
+
+* `--slice-order-step` allows explicit control of stepping behavior.
+* Default behavior:
+
+  * `legacy` → step = 4 (backward compatible)
+  * all other modes → step = 1
+
+### Manual Override
+
+* `--slice-order` allows direct specification of acquisition groups.
+* Validation ensures:
+
+  * full slice coverage
+  * no duplicates
+  * correct MB grouping
+
+---
+
+## 3. Slice Timing Computation
+
+If `--compute-slice-timing` is enabled:
+
+* Slice timing is reconstructed using:
+
+  * TR
+  * Number of slices
+  * Multi-band factor
+  * Derived slice-order
+
+Supports:
+
+* Automatic modes
+* Stepped acquisitions
+* Manual slice order definitions
+
+---
+
+## 4. Phase Encoding Direction
+
+Determined via:
+
+1. Manual override (`--phase-encoding-direction`)
+2. Exam Card logic (Philips)
+3. DICOM InPlanePhaseEncodingDirection
+
+New in v0.7.0:
+
+* Adds metadata field:
+
+```json
+"PhaseEncodingDirectionSource": "manual" | "computed"
+```
+
+This provides explicit provenance of the value.
+
+---
+
+## 5. Total Readout Time
+
+Computed using:
+
+* JSON `PhaseEncodingSteps` + `EffectiveEchoSpacing`
+* Philips formula (Chris Rorden approach)
+* Exam Card bandwidth + EPI factor
+* Fallback to existing `EstimatedTotalReadoutTime`
+
+Automatic ms → seconds normalization is applied when necessary.
+
+---
+
+## Installation
+
+### Clone
 
 ```bash
 git clone <repository-url>
 cd <repository-folder>
 ```
 
-### Step 2: Install Dependencies
-
-#### Using Virtual Environment
-
-Create a virtual environment and install required packages:
+### Virtual Environment
 
 ```bash
 python3 -m venv env
-source env/bin/activate  # For Linux/macOS
-env\Scripts\activate   # For Windows
-
+source env/bin/activate
 pip install -r requirements.txt
 ```
 
-#### Using Conda
-
-Alternatively, you can create an environment using Conda:
+### Conda
 
 ```bash
 conda env create -f res/config/fixSidecar.yml
@@ -98,49 +182,42 @@ conda activate fixSidecar
 
 ---
 
-## **Usage**
+# Usage
 
-Run the script to convert DICOM files and update their metadata:
+## Conversion + Harmonization
 
 ```bash
 python dcm_convert.py <dicom_file> <output_dir> [options]
 ```
 
-Or use the standalone script to update an existing NIfTI JSON sidecar:
+## Standalone Metadata Update
 
 ```bash
 python update_json_sidecar.py <dicom_file> <json_file> <output_file> [options]
 ```
 
-### Arguments
+---
 
-For `dcm_convert.py`:
+# CLI Options (v0.7.0)
 
-- `<dicom_file>`: Path to the DICOM file or directory.
-- `<output_dir>`: Directory where the converted NIfTI and updated JSON files will be saved.
-#### Options
-- `--no-fmri`: Skip JSON-sidecar update (useful for structural or non-fMRI data).
+### Common Options
 
-For `update_json_sidecar.py`:
+* `--compute-slice-timing`
+* `--compute-total-readout`
+* `--exam-card`
+* `--scanner-type`
+* `--flip-phase-encoding-direction`
+* `--phase-encoding-direction`
 
-- `<dicom_file>`: Path to the DICOM file.
-- `<json_file>`: Path to the existing JSON sidecar file.
-- `<output_file>`: Path to save the updated JSON file.
+### Slice-Order Options
 
-#### Options
-
-- `--exam-card`: Path to the Exam Card file (Philips scanners) for additional metadata.
-- `--compute-slice-timing`: Enable calculation of `SliceTiming`.
-- `--compute-total-readout`: Enable calculation of `TotalReadoutTime`.
-- `--slice-order`: Provide a custom slice acquisition order (as a JSON string).
-- `--tmp-dir`: Specify a temporary directory for intermediate processing.
-- `--scanner-type`: Define the scanner type (default: "Philips").
-- `--flip-phase-encoding-direction`: Toggle the sign of the phase encoding direction.
-- `--phase-encoding-direction`: Manually provide the BIDS PhaseEncodingDirection (e.g., j, j-, i, i-)
+* `--slice-order-mode legacy|ascending|interleaved|stepped`
+* `--slice-order-step <int>`
+* `--slice-order "<json_string>"`
 
 ---
 
-## **Example Usage**
+# Example Usage
 
 ### Basic Conversion
 
@@ -148,49 +225,65 @@ For `update_json_sidecar.py`:
 python dcm_convert.py example_dicom_folder output_directory
 ```
 
-### Advanced Usage with Metadata Fixes
+### Stepped Acquisition Example
 
 ```bash
-python dcm_convert.py example_dicom_folder output_directory --compute-slice-timing --exam-card exam_card.txt --slice-order "[[0, 4, 8], [1, 5, 9], [2, 6, 10]]"
+python dcm_convert.py example_dicom_folder output_directory \
+    --compute-slice-timing \
+    --slice-order-mode stepped \
+    --slice-order-step 3
 ```
 
-### Standalone Metadata Update
+### Manual Phase Encoding Direction
 
 ```bash
-python update_json_sidecar.py example.dcm existing_metadata.json updated_metadata.json --compute-slice-timing --slice-order "[[0, 4, 8], [1, 5, 9], [2, 6, 10]]"
+python dcm_convert.py example_dicom_folder output_directory \
+    --phase-encoding-direction "-j"
+```
+
+### Standalone JSON Update
+
+```bash
+python update_json_sidecar.py example.dcm existing.json updated.json \
+    --compute-slice-timing \
+    --slice-order-mode interleaved
 ```
 
 ---
 
-## **New Features in this version**
+# Versioning
 
-- **Manual Phase Encoding Direction**
+Both scripts support:
 
-  - Added support for the `--phase-encoding-direction` flag to both `dcm_convert.py` and `update_json_sidecar.py`.
-  - This option allows users to manually specify the `PhaseEncodingDirection` (e.g., "j", "-j", "i", "-i").
-  - If this option is used, automatic computation from DICOM or ExamCard is skipped.
-  - The output JSON will include a new metadata field: `PhaseEncodingDirectionSource`, which will be set to either `"manual"` or `"computed"` depending on how the direction was determined.
+```bash
+--version
+```
 
-- **Fallback Estimation from NIfTI**
+Which reports:
 
-  - If `PhaseEncodingSteps` or `NumberOfSlices` are not found in the JSON, DICOM headers, or ExamCard, the values are automatically estimated from the corresponding NIfTI image file.
-  - This increases robustness when metadata is incomplete or inconsistently exported.
-
-
----
-
-## **Notes**
-
-- Ensure `dcm2niix` is installed and accessible in your system's PATH.
-- Use the `--exam-card` option for Philips scanners to improve metadata accuracy.
-- This script supports both individual DICOM files and directories containing multiple DICOMs.
+* Tool version
+* Python version
+* Platform information
 
 ---
 
-## **Disclaimer**
-- The script was developed and tested on only data from the Philips 3T Ingenia CX MRI Scanner at the Vanderbilt University Institute of Imaging Sciences (VUIIS) at Vanderbilt University. There may be inaccuracies introduced when applying this script to other MRI scanners; be sure to check all processes and outputs carefully, if applying to data from a different MRI scanner.
+# Notes
+
+* Requires `dcm2niix` available in system PATH.
+* Designed and validated primarily on Philips 3T Ingenia CX systems.
+* Cross-scanner use should be validated carefully.
+
 ---
 
-## Acknowledgments
+# Disclaimer
+
+This software was developed and tested using data from the Philips 3T Ingenia CX MRI Scanner at the Vanderbilt University Institute of Imaging Sciences (VUIIS). Application to other scanners may require verification of acquisition assumptions and output correctness.
+
+---
+
+# Acknowledgments
+
 This work was supported by the following grant:
 NIH R01HD114489, CRCNS: Dense longitudinal neuroimaging to evaluate learning in childhood (Principal Investigator S. Vinci Booher)
+
+We also thank **Eric Wilkey** for helpful feedback that improved this tool.

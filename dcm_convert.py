@@ -6,29 +6,42 @@ Created on Tue Oct 21 17:05:44 2024
 #########################################################################################################################
 #########################################################################################################################
 ###################                                                                                   ###################
-################### Title:               Dicom Convert and Sidecar fix                                ###################
+################### Title:               DICOM Convert and BIDS Sidecar Harmonization                ###################
 ###################                                                                                   ###################
 ################### Description:                                                                      ###################
-################### This script facilitates the conversion of DICOM files to NIfTI format            ###################
-################### and ensures the resulting JSON sidecar is compliant with BIDS (Brain Imaging    ###################
-################### Data Structure) metadata standards.                                              ###################
+################### This script converts DICOM data to NIfTI format using dcm2niix and               ###################
+################### programmatically updates the resulting JSON sidecar to ensure                    ###################
+################### compliance with BIDS (Brain Imaging Data Structure) standards.                   ###################
 ###################                                                                                   ###################
-################### Version:        0.2.0                                                             ###################
+################### The tool supports advanced metadata handling, including:                         ###################
+###################   - Automatic or user-defined slice-order reconstruction                         ###################
+###################   - Legacy protocol preservation (LAB-specific behavior)                         ###################
+###################   - Generalized slice acquisition modes (ascending, interleaved, stepped)        ###################
+###################   - SliceTiming computation                                                      ###################
+###################   - TotalReadoutTime and EffectiveEchoSpacing estimation                         ###################
+###################   - PhaseEncodingDirection inference with optional manual override               ###################
+###################   - Provenance tracking of computed vs manual metadata                           ###################
 ###################                                                                                   ###################
-################### Requirements:   Python modules - nibabel, dipy                                   ###################
-###################                 External tool - dcm2niix                                        ###################
+################### Version:        0.7.0                                                             ###################
 ###################                                                                                   ###################
-################### Bash Version:   Tested on GNU bash, version 4.3.48                               ###################
+################### Requirements:                                                                     ###################
+###################   - Python modules: nibabel, dipy, pydicom                                       ###################
+###################   - External tool: dcm2niix                                                       ###################
 ###################                                                                                   ###################
-################### Author:          Gabriele Amorosino                                             ###################
-################### Contact:         gabriele.amorosino@utexas.edu                                  ###################
+################### Bash Version:   Tested on GNU bash 4.3.48                                        ###################
+###################                                                                                   ###################
+################### Author:          Gabriele Amorosino                                              ###################
+################### Contact:         gabriele.amorosino@utexas.edu                                   ###################
 ###################                                                                                   ###################
 #########################################################################################################################
 #########################################################################################################################
 ###################                                                                                   ###################
-################### Update:  Integrated DICOM to NIfTI conversion using dcm2niix                     ###################
-###################          Automated JSON sidecar updates to align with BIDS metadata standards   ###################
-###################          Added advanced metadata calculations (SliceTiming, ReadoutTime, etc.)  ###################
+################### v0.7.0 Updates:                                                                   ###################
+###################   - Introduced generalized slice-order framework                                 ###################
+###################   - Added stepped acquisition mode with configurable step size                   ###################
+###################   - Preserved legacy LAND-lab acquisition behavior                               ###################
+###################   - Improved CLI argument consistency across wrapper and sidecar                 ###################
+###################   - Added explicit metadata provenance field                                      ###################
 ###################                                                                                   ###################
 #########################################################################################################################
 #########################################################################################################################
@@ -40,7 +53,13 @@ import shutil
 import tempfile
 import subprocess
 import argparse
+import sys
 from update_json_sidecar import update_json_with_dicom_info
+
+__title__ = "DICOM Convert and BIDS Sidecar Harmonization"
+__version__ = "0.7.0"
+__author__ = "Gabriele Amorosino"
+__contact__ = "gabriele.amorosino@utexas.edu"
 
 def convert_dicom_to_nifti(dicom_file: str, output_dir: str, tmp_dir: str = None):
     """
@@ -119,14 +138,11 @@ def main():
     )
     parser.add_argument("dicom_file", help="Path to the DICOM file or directory.")
     parser.add_argument("output_dir", help="Output directory for the NIfTI and JSON files.")
-    # ------------------------------------------------------------------------- #
-    # NEW FLAG: tell the script *not* to touch the JSON sidecar for fMRI data
     parser.add_argument(
         "--no-fmri",
         help="Skip JSON-sidecar update (useful for structural or non-fMRI data).",
         action="store_true",
     )
-    # ------------------------------------------------------------------------- #
     parser.add_argument("--exam-card", help="Path to the exam card file.", default=None)
     parser.add_argument("--compute-slice-timing", help="Enable Slice Timing calculation.", action="store_true")
     parser.add_argument("--compute-total-readout", help="Enable Total Readout Time calculation.", action="store_true")
@@ -134,7 +150,39 @@ def main():
     parser.add_argument("--tmp-dir", help="Optional temporary directory for processing.", default=None)
     parser.add_argument("--scanner-type", help="Scanner type (default: 'Philips').", default="Philips")
     parser.add_argument("--flip-phase-encoding-direction", help="Toggle the sign of the phase encoding direction.", action="store_true")
+    parser.add_argument(
+    "--phase-encoding-direction",
+    help="Manually specify PhaseEncodingDirection (e.g., j, j-, i, i-).",
+    default=None)
+    parser.add_argument(
+    "--slice-order-mode",
+    help="Automatic slice-order strategy when --slice-order is not provided.",
+    choices=["legacy", "ascending", "interleaved", "stepped"],
+    default="legacy",   # this is the safe retrocompatible default      
+)
+    parser.add_argument(
+        "--slice-order-step",
+        help=(
+            "Step size for slice-order calculation. Used only for "
+            "--slice-order-mode stepped (and legacy if you choose it)."
+        ),
+        type=int,
+        default=None,
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=(
+            "%(prog)s "
+            f"v{__version__}  "
+            f"Python {sys.version.split()[0]}  "
+            f"({sys.platform})"
+        ),
+    )
     args = parser.parse_args()
+
+    if args.slice_order_step is not None and args.slice_order_step <= 0:
+        parser.error("--slice-order-step must be > 0.")
 
     # Step 1: DICOM → NIfTI
     nifti_file, json_file = convert_dicom_to_nifti(
@@ -143,6 +191,16 @@ def main():
 
     # Step 2: update JSON sidecar unless the user asked not to
     if not args.no_fmri:
+        slice_order_step = args.slice_order_step
+        if slice_order_step is None:
+            slice_order_step = 4 if args.slice_order_mode == "legacy" else 1
+
+        slice_order_mode_was_set = ("--slice-order-mode" in sys.argv)
+        slice_order_step_was_set = ("--slice-order-step" in sys.argv)
+
+        if args.slice_order and (slice_order_mode_was_set or slice_order_step_was_set):
+            print("Note: --slice-order provided; ignoring --slice-order-mode and --slice-order-step.")
+
         update_json_with_dicom_info(
             dicom_path=args.dicom_file,
             json_path=json_file,
@@ -150,9 +208,12 @@ def main():
             exam_card_path=args.exam_card,
             compute_slice_timing=args.compute_slice_timing,
             user_slice_order=args.slice_order,
-            scanner_type=args.scanner_type,
+            scanner_type=args.scanner_type.upper(),
             calculate_total_readout=args.compute_total_readout,
             flip_phase=args.flip_phase_encoding_direction,
+            user_phase_encoding_direction=args.phase_encoding_direction,
+            slice_order_mode=args.slice_order_mode,
+            slice_order_step=slice_order_step,
         )
 
 if __name__ == "__main__":

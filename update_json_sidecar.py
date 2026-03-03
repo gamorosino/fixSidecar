@@ -5,10 +5,43 @@ Created on Tue Oct 21 17:05:44 2024
 
 #########################################################################################################################
 #########################################################################################################################
-################### Author:          Gabriele Amorosino                                               ###################
-################### Contact:         gabriele.amorosino@utexas.edu                                    ###################
+###################                                                                                   ###################
+################### Title:               BIDS JSON Sidecar Harmonization Engine                       ###################
+###################                                                                                   ###################
+################### Description:                                                                      ###################
+################### This module updates and augments JSON sidecar files generated from               ###################
+################### DICOM-to-NIfTI conversion to ensure compliance with BIDS standards.              ###################
+###################                                                                                   ###################
+################### It provides robust metadata handling including:                                  ###################
+###################   - SliceTiming reconstruction (automatic or user-defined)                       ###################
+###################   - Generalized slice-order modeling (ascending, interleaved, stepped)           ###################
+###################   - Preservation of legacy lab-specific acquisition logic                        ###################
+###################   - PhaseEncodingDirection inference from DICOM or exam card                     ###################
+###################   - TotalReadoutTime and EffectiveEchoSpacing estimation                         ###################
+###################   - Philips-specific readout computation support                                 ###################
+###################   - Metadata provenance tracking (manual vs computed fields)                     ###################
+###################                                                                                   ###################
+################### Version:        0.7.0                                                             ###################
+###################                                                                                   ###################
+################### Requirements:                                                                     ###################
+###################   - Python modules: pydicom, numpy                                               ###################
+###################                                                                                   ###################
+################### Author:          Gabriele Amorosino                                              ###################
+################### Contact:         gabriele.amorosino@utexas.edu                                   ###################
+###################                                                                                   ###################
 #########################################################################################################################
 #########################################################################################################################
+###################                                                                                   ###################
+################### v0.7.0 Updates:                                                                   ###################
+###################   - Refactored slice-order logic into legacy and generalized frameworks          ###################
+###################   - Introduced stepped acquisition mode with configurable step size              ###################
+###################   - Removed hard-coded assumptions from legacy logic                             ###################
+###################   - Added validation for user-provided slice-order structures                    ###################
+###################   - Added PhaseEncodingDirection provenance annotation                            ###################
+###################                                                                                   ###################
+#########################################################################################################################
+#########################################################################################################################
+
 """
 
 
@@ -19,66 +52,133 @@ import sys
 import ast
 import re
 
+__title__ = "BIDS JSON Sidecar Harmonization Engine"
+__version__ = "0.7.0"
+__author__ = "Gabriele Amorosino"
+__contact__ = "gabriele.amorosino@utexas.edu"
+
 def calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr):
     """Calculate slice timing based on acquisition parameters."""
-    set_interval = tr / sets_per_tr  # Convert TR from ms to seconds
+    dt = tr / sets_per_tr  # TR is in seconds (dcm2niix); interval per MB-shot
     slice_timing = np.zeros(num_slices)
     
     for i, slice_group in enumerate(slice_order):
         for slice_index in slice_group:
-            slice_timing[slice_index] = i * set_interval
+            slice_timing[slice_index] = i * dt
     return slice_timing.tolist()
 
 
-def calculate_correct_slice_order(num_slices, mb_factor,step_size = 4 ):
-    """Calculate slice acquisition order based on number of slices and MB factor."""
+def validate_slice_order(slice_order, num_slices, mb_factor):
+    if not isinstance(slice_order, list) or not all(isinstance(g, list) for g in slice_order):
+        raise ValueError("slice_order must be a list of lists.")
+
+    flat = [s for g in slice_order for s in g]
+
+    if len(flat) != num_slices:
+        raise ValueError(f"slice_order covers {len(flat)} slices, expected {num_slices}.")
+
+    if len(set(flat)) != num_slices:
+        raise ValueError("slice_order contains duplicate slice indices.")
+
+    if min(flat) < 0 or max(flat) >= num_slices:
+        raise ValueError("slice_order indices out of range.")
+
+    if not all(len(g) == mb_factor for g in slice_order):
+        raise ValueError("each group in slice_order must have length == mb_factor.")
+
+def shot_order_stepped_with_restart(offset, step):
+    order = []
+    used = set()
+    for start in range(offset):
+        i = start
+        while i not in used:
+            order.append(i)
+            used.add(i)
+            i = (i + step) % offset
+        if len(used) == offset:
+            break
+    return order
+
+def calculate_correct_slice_order_general(num_slices, mb_factor, mode="ascending", slice_order_step=1):
+    if mb_factor is None or mb_factor <= 0:
+        raise ValueError("MultiBandFactor must be > 0.")
+    if num_slices is None or num_slices <= 0:
+        raise ValueError("NumberOfSlices must be > 0.")
+    if num_slices % mb_factor != 0:
+        raise ValueError("Number of slices must be divisible by MB factor.")
+
+    offset = num_slices // mb_factor
+
+    if mode == "stepped":
+        if slice_order_step % offset == 0:
+            print(
+                f"Warning: slice_order_step={slice_order_step} is a multiple of offset={offset}; "
+                "stepped order will degenerate."
+            )
+            
+    if mode == "ascending":
+        shot_order = list(range(offset))
+    elif mode == "interleaved":
+        shot_order = list(range(0, offset, 2)) + list(range(1, offset, 2))
+    elif mode == "stepped":
+        shot_order = shot_order_stepped_with_restart(offset, slice_order_step)
+    else:
+        raise ValueError("mode must be 'ascending', 'interleaved', or 'stepped'.")
+
+    return [[i + j * offset for j in range(mb_factor)] for i in shot_order]
+
+def calculate_correct_slice_order_legacy(num_slices, mb_factor, slice_order_step=4):
+    """
+    Legacy slice-order logic tuned to the original dataset (LAND LAB protocol).
+    Assumes mb_factor == 3.
+    """
     if mb_factor <= 0:
-        raise ValueError("MultiBand Factor (MB Factor) must be greater than zero.")
+        raise ValueError("MultiBand Factor (MB Factor) must be > 0.")
+    if num_slices % mb_factor != 0:
+        raise ValueError("Number of slices must be divisible by MB factor.")
+
+    off = num_slices // mb_factor  # distance between stacks
+
+    LEGACY_MB_FACTOR = 3
+    if mb_factor != LEGACY_MB_FACTOR:
+        raise ValueError(
+            f"Legacy slice order assumes mb_factor={LEGACY_MB_FACTOR}. "
+            f"Got mb_factor={mb_factor}. Use slice_order_mode='ascending' or 'interleaved', "
+            f"or provide --slice-order."
+        )
 
     slice_order = []
-     # Increment between groups
-    # Loop to create the interleaved groups
-    off=int(num_slices/mb_factor)
-    k=0
-    steps = 0
-    a_i=0
-    flag_on=0
-    cont=0
-    slices = list(range(0,num_slices,mb_factor))
-    for stp in slices:
-        group = []
-        cont = cont + 1
-        if stp == 0:
-            step_size=0
-            a_i=0
-        else:
-            step_size=4
-        if flag_on == 0:
-            if  a_i + step_size + off + off >= num_slices:
-                flag_on = 1
-                k = k + 1 
-                cont = 0
-                a_i=0 + k 
-                step_size=0
-                #a_i = a_i +  step_size
-        else:
-            if a_i +  step_size+2*off >= num_slices:
-                flag_on = 1
-                k = k + 1 
-                cont = 0
-                a_i=0 + k 
-                step_size=0
-                #a_i = a_i +  step_size
-        a_i = a_i +  step_size
-        b_i = a_i + off
-        c_i = b_i + off
+    k = 0
+    a_i = 0
+    last_stack_offset = (mb_factor - 1) * off  # == 2*off for mb_factor=3
 
-        group=[a_i,b_i,c_i]
+    for shot_idx in range(0, num_slices, mb_factor):
+        current_step = 0 if shot_idx == 0 else slice_order_step
+
+        if a_i + current_step + last_stack_offset >= num_slices:
+            k += 1
+            a_i = k
+            current_step = 0
+
+        a_i = a_i + current_step
+        group = [a_i + s * off for s in range(mb_factor)]  # size 3 here
         slice_order.append(group)
 
     return slice_order
 
-
+def calculate_correct_slice_order(num_slices, mb_factor, slice_order_mode="legacy", slice_order_step=1):
+    """
+    slice_order_mode:
+      - "legacy": preserves the original "LANDlab-specific behavior" exactly
+      - "ascending": general MB grouping, ascending shot order
+      - "interleaved": general MB grouping, interleaved shot order
+    """
+    if slice_order_mode == "legacy":
+        return calculate_correct_slice_order_legacy(num_slices, mb_factor, slice_order_step=slice_order_step)
+    else:
+        return calculate_correct_slice_order_general(
+            num_slices, mb_factor, mode=slice_order_mode, slice_order_step=slice_order_step
+        )
 
 def parse_tr_from_exam_card(protocol_details):
     """Extract TR (Repetition Time) from the protocol details, handling various formats."""
@@ -182,7 +282,7 @@ def determine_phase_encoding_direction(dicom_path, scanner_type="SIEMENS", exam_
     # Read DICOM
     ds = pydicom.dcmread(dicom_path)
     series_description = ds.get("SeriesDescription", "Unknown").strip()
-
+    protocol_details = None
     if exam_card_path:
         protocol_details = match_protocol_in_exam_card(series_description, exam_card_path)
         if protocol_details:
@@ -226,15 +326,32 @@ def determine_phase_encoding_direction(dicom_path, scanner_type="SIEMENS", exam_
     return inplane_pe_dir
 
 
-def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_total_readout=False, scanner_type="SIEMENS", exam_card_path=None, compute_slice_timing=False, user_slice_order=None, flip_phase=False):
+def update_json_with_dicom_info(
+    dicom_path,
+    json_path,
+    output_path,
+    calculate_total_readout=False,
+    scanner_type="SIEMENS",
+    exam_card_path=None,
+    compute_slice_timing=False,
+    user_slice_order=None,
+    flip_phase=False,
+    user_phase_encoding_direction=None,
+    slice_order_mode="legacy",
+    slice_order_step=1,
+):
+
     # Read the DICOM file
     ds = pydicom.dcmread(dicom_path)
     with open(json_path, 'r') as f:
         json_data = json.load(f)    
-    phase_encoding_steps = int(json_data.get("PhaseEncodingSteps", None))
-    effective_echo_spacing = float(json_data.get("EstimatedEffectiveEchoSpacing", None))
-    tr = float(json_data.get("RepetitionTime", None))
-    if tr: tr=tr
+    pes_raw = json_data.get("PhaseEncodingSteps")
+    phase_encoding_steps = int(pes_raw) if pes_raw is not None else None
+    ees_raw = json_data.get("EstimatedEffectiveEchoSpacing")
+    effective_echo_spacing = float(ees_raw) if ees_raw is not None else None
+    tr_raw = json_data.get("RepetitionTime")
+    tr = float(tr_raw) if tr_raw is not None else None
+    #if tr: tr=tr
     num_slices = json_data.get("NumberOfSlices", None)
     if num_slices: num_slices=int(num_slices)
     mb_factor = json_data.get("MultiBandFactor", None)
@@ -292,6 +409,20 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
 
     # Default values if parameters are still missing
 
+
+# -------------------------------------------------------------------------
+# NOTE (future improvement):
+# TR may come from different sources (JSON, DICOM, or exam card).
+# JSON (dcm2niix) typically stores TR in seconds, while DICOM/exam-card
+# values are often in milliseconds. If heterogeneous inputs are expected,
+# consider normalizing units here, e.g.:
+#
+#     if tr > 50:   # heuristic: TR likely provided in ms
+#         tr /= 1000.0
+#
+# Currently we assume TR is already in seconds.
+# -------------------------------------------------------------------------
+
     if not tr:
         raise ValueError(f"Repetition Time not found SeriesDescription: '{series_description}'")
 
@@ -312,24 +443,41 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
     # Calculate Slice Timing
     slice_timing = None
     if compute_slice_timing:
-        # Slice order
         if user_slice_order:
-            slice_order = ast.literal_eval(user_slice_order)  # Convert string to list
+            slice_order = ast.literal_eval(user_slice_order)
+            validate_slice_order(slice_order, num_slices, mb_factor)
             print(f"Using user-provided slice order: {slice_order}")
         else:
-            slice_order = calculate_correct_slice_order(num_slices, mb_factor)
-        print(f"Calculated slice order: {slice_order}")
+            # step is only meaningful for "stepped" (and legacy uses it as well)
+            effective_step = 1 if slice_order_mode in ("ascending", "interleaved") else slice_order_step
+
+            slice_order = calculate_correct_slice_order(
+                num_slices,
+                mb_factor,
+                slice_order_mode=slice_order_mode,
+                slice_order_step=effective_step
+            )
+            print(f"Using automatic slice order mode: {slice_order_mode}")
+            if slice_order_mode == "stepped":
+                print(f"Using step size: {effective_step}")
+            print(f"Calculated slice order: {slice_order}")
+
         sets_per_tr = num_slices // mb_factor
-        print("sets_per_tr: ",sets_per_tr)
         slice_timing = calculate_slice_timing(tr, num_slices, mb_factor, slice_order, sets_per_tr)
 
     # Determine Phase Encoding Direction
-    bids_phase_encoding_direction = determine_phase_encoding_direction(dicom_path, scanner_type, exam_card_path, flip_phase=flip_phase)
+    if user_phase_encoding_direction:
+        bids_phase_encoding_direction = user_phase_encoding_direction
+        print(f"Using user-provided PhaseEncodingDirection: {bids_phase_encoding_direction}")
+    else:
+        bids_phase_encoding_direction = determine_phase_encoding_direction(
+            dicom_path, scanner_type, exam_card_path, flip_phase=flip_phase
+        )
 
     # Calculate Total Readout Time
 
     if calculate_total_readout:
-
+        protocol_details = None
         if exam_card_path:
             protocol_details = match_protocol_in_exam_card(ds.get("SeriesDescription", "Unknown"), exam_card_path)
 
@@ -355,14 +503,15 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
             if effective_echo_spacing is not None:
                 total_readout_time = calculate_total_readout_time(phase_encoding_steps, effective_echo_spacing)
             else:
-                ValueError("Effective echo spacing is missing from the provided JSON file.")
+                raise ValueError("Effective echo spacing is missing from the provided JSON file.")
     else:
-        total_readout_time = float(json_data.get("EstimatedTotalReadoutTime", None))
+        trt_raw = json_data.get("EstimatedTotalReadoutTime")
+        total_readout_time = float(trt_raw) if trt_raw is not None else None
         print('Set Total Readout Time as EstimatedTotalReadoutTime field of json file')
         if total_readout_time is None:
             total_readout_time = float(ds.get("EstimatedTotalReadoutTime", None))
         if total_readout_time is None:
-            ValueError('EstimatedTotalReadoutTime missed from json file...')
+            raise ValueError('EstimatedTotalReadoutTime missed from json file...')
     if total_readout_time and total_readout_time > 1:  # Convert from ms to seconds if necessary
             total_readout_time /= 100
 
@@ -376,7 +525,10 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
     json_data["TotalReadoutTime"] = total_readout_time
     json_data["EffectiveEchoSpacing"] = effective_echo_spacing
     json_data["PhaseEncodingDirection"] = bids_phase_encoding_direction
-
+    # provenance field (safe, optional metadata extension)
+    json_data["PhaseEncodingDirectionSource"] = (
+        "manual" if user_phase_encoding_direction else "computed"
+    )
     print("Slice Timing: ",slice_timing)
     print("Total Readout Time: ",total_readout_time)
     print("Effective echo spacing: ",effective_echo_spacing)
@@ -387,20 +539,51 @@ def update_json_with_dicom_info(dicom_path, json_path, output_path, calculate_to
         json.dump(json_data, f, indent=4)
 
     print(f"Updated JSON saved to {output_path}")
-
-
 def print_help():
     print("""
-Usage: python script_name.py <dicom_file> <json_file> <output_file> <exam_card_file> [--compute-slice-timing] [--slice-order <slice_order>]
+Usage:
+  python update_json_sidecar.py <dicom_file> <json_file> <output_file> [exam_card_file]
+      [--compute-slice-timing]
+      [--slice-order "<json_string>"]
+      [--slice-order-mode legacy|ascending|interleaved|stepped]
+      [--slice-order-step <int>]
+      [--phase-encoding-direction "<dir>"]
+      [--flip-phase]
 
 Options:
-  --compute-slice-timing   Enable Slice Timing calculation.
-  --slice-order            Provide a custom slice order as a string representation of a list of lists.
-                           Example: "[[0, 4, 8], [1, 5, 9], [2, 6, 10]]"
-    """)
+  --compute-slice-timing
+      Enable SliceTiming calculation.
+
+  --slice-order
+      Provide a custom slice acquisition order (as a JSON string).
+      If specified, the script will skip automatic slice-order calculation and use the user-provided order.
+      Example: --slice-order "[[0,12,24],[1,13,25],[2,14,26]]"
+
+  --slice-order-mode
+      Automatic slice-order strategy used only when --slice-order is NOT provided.
+      Choices: legacy, ascending, interleaved, stepped
+      Default: legacy (preserves original lab-specific behavior)
+          
+  --slice-order-step
+      Step size used only for:
+        - slice-order-mode=stepped (general stepped cycling), and
+        - slice-order-mode=legacy (defaults to 4 if not provided).
+      Default: 1 (except legacy defaults to 4).
+          
+  --phase-encoding-direction
+      Manually specify PhaseEncodingDirection (e.g., "j", "j-", "i", "i-").
+      If specified, it overrides DICOM/ExamCard inference.
+      
+  --flip-phase
+      Toggle the sign of the inferred phase encoding direction.
+""")
 
 
 if __name__ == '__main__':
+    if "--version" in sys.argv:
+        print(f"update_json_sidecar.py v{__version__}  Python {sys.version.split()[0]}  ({sys.platform})")
+        sys.exit(0)
+
     if len(sys.argv) < 4:
         print_help()
         sys.exit(1)
@@ -418,15 +601,55 @@ if __name__ == '__main__':
         except IndexError:
             print("Error: --slice-order requires a slice order as its argument.")
             sys.exit(1)
+    slice_order_mode = "legacy"
+    if "--slice-order-mode" in sys.argv:
+        try:
+            slice_order_mode = sys.argv[sys.argv.index("--slice-order-mode") + 1]
+        except IndexError:
+            print("Error: --slice-order-mode requires an argument (legacy|ascending|interleaved).")
+            sys.exit(1)
+
+        if slice_order_mode not in ("legacy", "ascending", "interleaved", "stepped"):
+            print("Error: --slice-order-mode must be one of: legacy, ascending, interleaved, stepped.")
+            sys.exit(1)
+    phase_encoding_direction = None
+
+    if "--phase-encoding-direction" in sys.argv:
+        try:
+            phase_encoding_direction = sys.argv[sys.argv.index("--phase-encoding-direction") + 1]
+        except IndexError:
+            print("Error: --phase-encoding-direction requires a value (e.g., j, -j, i, -i).")
+            sys.exit(1)
     flip_phase = "--flip-phase" in sys.argv
+
+    slice_order_step = 1
+    step_was_set = ("--slice-order-step" in sys.argv)
+
+    if step_was_set:
+        try:
+            slice_order_step = int(sys.argv[sys.argv.index("--slice-order-step") + 1])
+        except (IndexError, ValueError):
+            print("Error: --slice-order-step requires an integer argument (e.g., 4).")
+            sys.exit(1)
+    if slice_order_step <= 0:
+        print("Error: --slice-order-step must be > 0.")
+        sys.exit(1)
+
+    if not step_was_set and slice_order_mode == "legacy":
+        slice_order_step = 4
+
+
     update_json_with_dicom_info(
-        dicom_file,
-        json_file,
-        output_file,
-        calculate_total_readout=False,
-        scanner_type="PHILIPS",
-        exam_card_path=exam_card_file,
-        compute_slice_timing=compute_slice_timing,
-        user_slice_order=slice_order_arg,
-        flip_phase=flip_phase
-    )
+    dicom_file,
+    json_file,
+    output_file,
+    calculate_total_readout=False,
+    scanner_type="PHILIPS",
+    exam_card_path=exam_card_file,
+    compute_slice_timing=compute_slice_timing,
+    user_slice_order=slice_order_arg,
+    flip_phase=flip_phase,
+    user_phase_encoding_direction=phase_encoding_direction,
+    slice_order_mode=slice_order_mode,
+    slice_order_step=slice_order_step,
+)
