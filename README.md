@@ -381,5 +381,5 @@ This software was developed and tested using data from the Philips 3T Ingenia CX
 
 This work was supported by the following grant:
 NIH R01HD114489, CRCNS: Dense longitudinal neuroimaging to evaluate learning in childhood (Principal Investigator S. Vinci Booher)
-
+Awards Wellcome 226486/Z/22/Z and NIH NINDS U24-NS140384 to F. Pestilli and NIH NINDS UM1-NS132207 to K. Ugurbil.
 We also thank **Eric Wilkey** for helpful feedback that improved this tool.
