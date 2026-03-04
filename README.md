@@ -10,9 +10,25 @@ Version **v0.7.0** introduces a generalized and extensible slice-order framework
 
 ## Author
 
-**Gabriele Amorosino** ([gabriele.amorosino@utexas.edu](mailto:gabriele.amorosino@utexas.edu))
+**Gabriele Amorosino** (gabriele.amorosino@utexas.edu)
 
 ---
+
+## How to Acknowledge This Work
+
+If you use this software in your research or pipeline, please include the following acknowledgment:
+
+> This work was developed by Gabriele Amorosino in the Laboratory of Franco Pestilli at the University of Texas at Austin.
+
+---
+
+## How to Cite This Work
+
+If this tool contributes to your research, please cite:
+
+> Amorosino, G., Vinci-Booher, S., & Pestilli, F.  
+> *Advancing FAIR data by facilitating the conversion of DICOM to NIfTI.*  
+> In preparation.
 
 ## Key Capabilities
 
@@ -382,4 +398,4 @@ This software was developed and tested using data from the Philips 3T Ingenia CX
 This work was supported by the following grant:
 NIH R01HD114489, CRCNS: Dense longitudinal neuroimaging to evaluate learning in childhood (Principal Investigator S. Vinci Booher)
 Awards Wellcome 226486/Z/22/Z and NIH NINDS U24-NS140384 to F. Pestilli and NIH NINDS UM1-NS132207 to K. Ugurbil.
-We also thank **Eric Wilkey** for helpful feedback that improved this tool.
+We also thank **Eric Wilkey** and **Elton (Ellie) Cross** for testing and helpful feedback that improved this tool.
