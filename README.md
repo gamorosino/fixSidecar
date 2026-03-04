@@ -14,13 +14,13 @@ Version **v0.7.0** introduces a generalized and extensible slice-order framework
 
 ---
 
-## How to Acknowledge This Work
+# How To Acknowledge
 
-If you use this software in your research or pipeline, please include the following acknowledgment:
-
+If you use this software in your research or pipeline, please include the following in your papers' acknowledgments:
 > This work was developed by Gabriele Amorosino in the Laboratory of Franco Pestilli at the University of Texas at Austin.
-
----
+This work was supported by the following grant:
+NIH R01HD114489, CRCNS: Dense longitudinal neuroimaging to evaluate learning in childhood (Principal Investigator S. Vinci Booher)
+Awards Wellcome 226486/Z/22/Z and NIH NINDS U24-NS140384 to F. Pestilli and NIH NINDS UM1-NS132207 to K. Ugurbil.
 
 ## How to Cite This Work
 
@@ -395,7 +395,5 @@ This software was developed and tested using data from the Philips 3T Ingenia CX
 
 # Acknowledgments
 
-This work was supported by the following grant:
-NIH R01HD114489, CRCNS: Dense longitudinal neuroimaging to evaluate learning in childhood (Principal Investigator S. Vinci Booher)
-Awards Wellcome 226486/Z/22/Z and NIH NINDS U24-NS140384 to F. Pestilli and NIH NINDS UM1-NS132207 to K. Ugurbil.
-We also thank **Eric Wilkey** and **Elton (Ellie) Cross** for testing and helpful feedback that improved this tool.
+We thank **Eric Wilkey** and **Elton (Ellie) Cross** for testing and helpful feedback that improved this tool.
+
